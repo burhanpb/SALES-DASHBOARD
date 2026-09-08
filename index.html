@@ -1,0 +1,1452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>ZBM Sales Dashboard</title>
+<style>
+:root {
+  --bg: #f4f6f8;
+  --card-bg: #ffffff;
+  --border: #dfe4ea;
+  --text: #1c2733;
+  --text-muted: #6b7684;
+  --accent: #1f6feb;
+  --accent-dark: #14539c;
+  --danger: #c0392b;
+  --good: #1e8e3e;
+  --header-bg: #16324f;
+  --header-text: #ffffff;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; }
+#root { min-height: 100vh; }
+
+/* Login */
+.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px; width: 100%; max-width: 360px; box-shadow: 0 4px 18px rgba(0,0,0,0.06); }
+.login-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; color: var(--header-bg); }
+.login-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; }
+.login-error { background: #fdecea; color: var(--danger); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+.field-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .03em; }
+
+.input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; background: #fff; color: var(--text); }
+.input-small { padding: 6px 8px; font-size: 13px; }
+.btn { border: none; border-radius: 8px; padding: 10px 14px; font-size: 14px; font-weight: 600; cursor: pointer; background: #eef1f4; color: var(--text); }
+.btn:hover { filter: brightness(0.97); }
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-block { width: 100%; margin-top: 16px; }
+.btn-ghost { background: transparent; color: var(--header-text); border: 1px solid rgba(255,255,255,0.35); }
+.btn-small { padding: 6px 10px; font-size: 12px; }
+
+/* Shell */
+.topbar { background: var(--header-bg); color: var(--header-text); display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+.topbar-title { font-weight: 700; font-size: 16px; }
+.topbar-user { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.user-badge { background: rgba(255,255,255,0.12); padding: 6px 10px; border-radius: 999px; }
+
+.statusbar { background: #eef2f6; border-bottom: 1px solid var(--border); padding: 6px 16px; }
+.statusbar-inner { display: flex; align-items: center; gap: 12px; font-size: 12px; flex-wrap: wrap; }
+.status-ok { color: var(--good); }
+.status-error { color: var(--danger); }
+.status-loading { color: var(--accent-dark); }
+
+.filterbar { background: #fff; border-bottom: 1px solid var(--border); padding: 10px 16px; position: sticky; top: 0; z-index: 5; }
+.filterbar-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+.filter-group { min-width: 140px; }
+.filter-label { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); margin-bottom: 3px; font-weight: 600; }
+.filter-disabled-note { font-size: 11px; color: var(--text-muted); font-style: italic; padding-top: 4px; }
+
+.multiselect { position: relative; }
+.multiselect-summary { border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; min-width: 110px; text-align: left; }
+.multiselect-panel { position: absolute; top: 100%; left: 0; background: #fff; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); padding: 8px; max-height: 220px; overflow-y: auto; min-width: 200px; z-index: 20; }
+.multiselect-panel.hidden { display: none; }
+.multiselect-row { display: block; font-size: 13px; padding: 3px 4px; white-space: nowrap; cursor: pointer; }
+
+.searchbar { margin-top: 4px; }
+
+.content { padding: 14px 16px 40px; max-width: 1400px; margin: 0 auto; }
+.page-title { font-size: 17px; margin: 6px 0 14px; color: var(--header-bg); }
+
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.kpi-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
+.kpi-value { font-size: 18px; font-weight: 700; color: var(--header-bg); }
+.kpi-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+.table-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+.table-title { font-weight: 700; font-size: 14px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.table-scroll { overflow-x: auto; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 640px; }
+.data-table th { position: sticky; top: 0; background: #f0f3f6; text-align: left; padding: 8px 10px; cursor: pointer; white-space: nowrap; border-bottom: 1px solid var(--border); user-select: none; }
+.data-table td { padding: 7px 10px; border-bottom: 1px solid #eef1f4; white-space: nowrap; }
+.data-table th.num, .data-table td.num { text-align: right; }
+.data-table tbody tr:hover { background: #f7fafd; }
+.empty-row { text-align: center; color: var(--text-muted); padding: 18px !important; }
+
+.loading-block, .error-block { padding: 40px 16px; text-align: center; color: var(--text-muted); }
+.error-block { color: var(--danger); }
+
+@media (max-width: 640px) {
+  .topbar-title { font-size: 14px; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .filter-group { min-width: 46%; }
+}
+
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+/* ======================================================================
+   ZBM SALES DASHBOARD - Phase 1
+   Login + role-based access + connected filters/search + Summary page
+   ====================================================================== */
+
+/* ---------------------------------------------------------------------
+   1. USER / CREDENTIAL TABLE  (from USER NAME AND ID.xlsx)
+   NOTE: passwords are plain text by design (accepted client-side gate
+   tradeoff - see conversation). Titles: SALES MEN < MANAGER < (GM/BDM/TME = full access)
+   --------------------------------------------------------------------- */
+const USERS = [
+  { username: "NasoorK",        password: "394", title: "SALES MEN", manager: "Navas" },
+  { username: "ShameemBabu",    password: "400", title: "SALES MEN", manager: "Jinu" },
+  { username: "AnsarMuhammad",  password: "369", title: "SALES MEN", manager: "Jinu" },
+  { username: "ArunR",          password: "222", title: "SALES MEN", manager: "Jinu" },
+  { username: "ShahulMohammed", password: "414", title: "SALES MEN", manager: "Navas" },
+  { username: "Chacko",         password: "373", title: "SALES MEN", manager: "Abdul Khader" },
+  { username: "SheyeerA_V",     password: "360", title: "SALES MEN", manager: "Navas" },
+  { username: "Sunil",          password: "339", title: "SALES MEN", manager: "Abdul Khader" },
+  { username: "AlikuttyKP",     password: "409", title: "SALES MEN", manager: "Abdul Khader" },
+  { username: "Direct-CPD",     password: "111", title: "SALES MEN", manager: null },
+  { username: "RaseethYusuf",   password: "350", title: "SALES MEN", manager: "Jinu" },
+  { username: "PHShahulV",      password: "399", title: "SALES MEN", manager: "Danish" },
+  { username: "PradeepE",       password: "207", title: "SALES MEN", manager: "Jinu" },
+  { username: "EbymonKG",       password: "340", title: "SALES MEN", manager: "Abdul Khader" },
+  { username: "MohamedRasheed", password: "388", title: "SALES MEN", manager: "Navas" },
+  { username: "HafisRahman",    password: "216", title: "SALES MEN", manager: "Abdul Khader" },
+  { username: "Shameem",        password: "226", title: "SALES MEN", manager: "Danish" },
+  { username: "ArifE",          password: "235", title: "SALES MEN", manager: "Danish" },
+  { username: "SakkeerMK",      password: "336", title: "SALES MEN", manager: "Navas" },
+  { username: "Muksid",         password: "208", title: "SALES MEN", manager: "Jinu" },
+  { username: "Anilash",        password: "322", title: "SALES MEN", manager: "Jinu" },
+  { username: "JZahir",         password: "356", title: "SALES MEN", manager: "Danish" },
+  { username: "Ibrahim",        password: "357", title: "SALES MEN", manager: "Danish" },
+  { username: "MohammedH",      password: "362", title: "SALES MEN", manager: "Danish" },
+  { username: "TorikullahEmon", password: "406", title: "SALES MEN", manager: "Danish" },
+  { username: "Majeed",         password: "408", title: "SALES MEN", manager: "Navas" },
+  { username: "MohdSohailKhan", password: "410", title: "SALES MEN", manager: "Danish" },
+  { username: "Jinu",           password: "205", title: "MANAGER",   manager: "KALYAN" },
+  { username: "Danish",         password: "407", title: "MANAGER",   manager: "KALYAN" },
+  { username: "Abdul Khader",   password: "375", title: "MANAGER",   manager: "KALYAN" },
+  { username: "Navas",          password: "381", title: "MANAGER",   manager: "KALYAN" },
+  { username: "KALYAN",         password: "201", title: "GM",        manager: "KALYAN" },
+  { username: "ANSAR ALI",      password: "376", title: "BDM",       manager: "KALYAN" },
+  { username: "SUSHANT",        password: "385", title: "TME",       manager: "KALYAN" },
+  { username: "JUNAID",         password: "204", title: "TME",       manager: "KALYAN" },
+  { username: "HAYAT",          password: "202", title: "TME",       manager: "KALYAN" },
+  { username: "AFEEF",          password: "401", title: "TME",       manager: "KALYAN" },
+  { username: "BURHAN",         password: "393", title: "TME",       manager: "KALYAN" },
+];
+
+const FULL_ACCESS_TITLES = ["GM", "BDM", "TME"];
+
+/* ---------------------------------------------------------------------
+   2. MONTH / GOOGLE SHEET REGISTRY
+   Add a new month here when a new pair of sheets is created.
+   --------------------------------------------------------------------- */
+const MONTHS = [
+  { key: "2026-07", label: "Jul 2026", targetId: "1UBs4f3GIsVSbl_buEmusBjrmpF1Jtre1kWHKu0BmCY8", salesId: "1ubL2OgXcMGHi8xzTjeL7_oG-W01NExoDFZfeJNdLXCs" },
+  { key: "2026-08", label: "Aug 2026", targetId: "128WFmTCqUlguNy1iGmKWQnngnQ_uRleEWp5FTEPIeoY", salesId: "1QJwOsenFN0LDhCEAhXXCZOSysBBlHPAJFOvLoMf-UJ0" },
+  { key: "2026-09", label: "Sep 2026", targetId: "1MNyUQaqjZdahNqwbz7P6nWAtYAJP19yiVzIB1S-ya4s", salesId: "1o5aCJRRbYxL-oc-8ZA2bi9-zwhL-Bem_PgAzz89K2Ok" },
+];
+
+/* ---------------------------------------------------------------------
+   3. GENERIC HELPERS
+   --------------------------------------------------------------------- */
+function normKey(s) {
+  return String(s == null ? "" : s).trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function normVal(s) {
+  return String(s == null ? "" : s).trim().toLowerCase();
+}
+function parseNum(v) {
+  if (v == null || v === "") return 0;
+  const n = parseFloat(String(v).replace(/,/g, "").trim());
+  return isNaN(n) ? 0 : n;
+}
+function fmtNum(n, dp) {
+  dp = dp == null ? 0 : dp;
+  if (n == null || isNaN(n)) n = 0;
+  return n.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+}
+function fmtPct(n) {
+  if (n == null || isNaN(n) || !isFinite(n)) return "0.0%";
+  return n.toFixed(1) + "%";
+}
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+/* Build a normalized-header -> actual-header lookup for a parsed CSV row set */
+function buildHeaderMap(fields) {
+  const map = {};
+  (fields || []).forEach((f) => { map[normKey(f)] = f; });
+  return map;
+}
+/* Get a field's value from a row, trying several candidate header names (already normalized-friendly) */
+function getField(row, headerMap, candidates) {
+  for (const c of candidates) {
+    const key = headerMap[normKey(c)];
+    if (key !== undefined && row[key] !== undefined) return row[key];
+  }
+  return "";
+}
+
+/* ---------------------------------------------------------------------
+   4. SHEET FETCH LAYER
+
+   IMPORTANT — two things learned the hard way:
+
+   (a) We deliberately do NOT use fetch()/XHR against the Google Sheets
+   gviz endpoint, and — after testing against a real browser — we also
+   do NOT use Google's own `google.visualization.Query` client library,
+   even though that's the "official" way. That library turns out to
+   issue a plain XMLHttpRequest internally, which gets blocked by CORS
+   exactly like fetch() does ("No 'Access-Control-Allow-Origin' header
+   is present"), confirmed via a real Chrome console. Instead we do the
+   underlying script-injection (JSONP) trick ourselves: gviz's default
+   JSON response is always wrapped as a call to the fixed global
+   function `google.visualization.Query.setResponse(...)` (this is NOT
+   configurable via the documented `responseHandler` tqx param — that
+   param is silently ignored; confirmed directly against the real
+   sheet), so we define that exact function ourselves and load the
+   query URL via a <script> tag. Script tags are never subject to CORS,
+   which is why this works where fetch/XHR cannot. Concurrent queries
+   are matched back to their caller via the `reqId` tqx param, which
+   gviz echoes back verbatim in the response.
+
+   (b) The TARGET sheet is NOT small — it holds one row per (salesman,
+   SKU, outlet) combination, which is 200,000+ rows for a single month.
+   Downloading that whole sheet into a phone's browser is exactly what
+   caused "Request timed out" in testing. So for the TARGET sheet we
+   never pull raw rows: every number is computed *on Google's servers*
+   using the Google Visualization Query Language (a SQL-like `select /
+   where / group by / order by / limit` syntax gviz supports natively),
+   and only the small aggregated result comes back to the browser.
+
+   The SALES sheet is far smaller (a few thousand rows/month across the
+   whole company) so it's fetched as real rows and aggregated in the
+   browser exactly like before — that part didn't need to change.
+   --------------------------------------------------------------------- */
+/* Wrap a raw gviz JSON "table" object ({cols:[...], rows:[...]}) in the
+   same minimal interface our code already uses everywhere a
+   google.visualization.DataTable used to be returned, so no caller
+   needed to change. */
+function wrapGvizTable(table) {
+  const cols = (table && table.cols) || [];
+  const rows = (table && table.rows) || [];
+  return {
+    getNumberOfColumns: () => cols.length,
+    getNumberOfRows: () => rows.length,
+    getColumnLabel: (c) => (cols[c] ? cols[c].label : ""),
+    getColumnId: (c) => (cols[c] ? cols[c].id : null),
+    getValue: (r, c) => {
+      const row = rows[r];
+      const cell = row && row.c ? row.c[c] : null;
+      if (!cell || cell.v === undefined) return null;
+      return cell.v;
+    },
+  };
+}
+
+/* Install the one global handler gviz always calls (regardless of any
+   responseHandler param), and route each response back to the pending
+   query that requested it via the echoed-back reqId. Installed once. */
+const _gvizPending = {};
+(function installGvizResponseHandler() {
+  window.google = window.google || {};
+  window.google.visualization = window.google.visualization || {};
+  window.google.visualization.Query = window.google.visualization.Query || {};
+  window.google.visualization.Query.setResponse = function (response) {
+    const reqId = String(response && response.reqId);
+    const pending = _gvizPending[reqId];
+    if (!pending) return; // stale (already timed out) or unknown — ignore
+    delete _gvizPending[reqId];
+    clearTimeout(pending.timer);
+    if (pending.script.parentNode) pending.script.parentNode.removeChild(pending.script);
+    if (!response || response.status === "error") {
+      const err = (response && response.errors && response.errors[0]) || {};
+      pending.reject(new Error(
+        "Sheet query failed (" + (err.reason || "error") + "): " + (err.detailed_message || err.message || "") +
+        ". Make sure the sheet is shared as 'Anyone with the link can view' (or edit)."
+      ));
+      return;
+    }
+    pending.resolve(wrapGvizTable(response.table));
+  };
+})();
+
+/* Run a Google Visualization Query Language string against a sheet via
+   script-injection (JSONP) — see the note above on why this is used
+   instead of fetch()/XHR or Google's own Query client library.
+   Resolves with a DataTable-like object (caller decides how to read it). */
+let _gvizReqCounter = 0;
+function runGvizQuery(sheetId, gql) {
+  return new Promise((resolve, reject) => {
+    const reqId = String(_gvizReqCounter++);
+    const script = document.createElement("script");
+    const timer = setTimeout(() => {
+      if (!_gvizPending[reqId]) return;
+      delete _gvizPending[reqId];
+      if (script.parentNode) script.parentNode.removeChild(script);
+      reject(new Error("Sheet query timed out. Make sure the sheet is shared as 'Anyone with the link can view' (or edit)."));
+    }, 25000);
+    _gvizPending[reqId] = { resolve, reject, script, timer };
+    script.onerror = function () {
+      if (!_gvizPending[reqId]) return;
+      delete _gvizPending[reqId];
+      clearTimeout(timer);
+      reject(new Error("Could not reach the Google Sheet (script failed to load). Check your internet connection."));
+    };
+    const base = (typeof window !== "undefined" && window.__GVIZ_BASE_OVERRIDE__) ||
+      "https://docs.google.com/spreadsheets/d/";
+    const url = base + sheetId +
+      "/gviz/tq?tqx=reqId:" + reqId + "&tq=" + encodeURIComponent(gql);
+    script.src = url;
+    document.head.appendChild(script);
+  });
+}
+
+/* Escape a value for use inside a single-quoted GQL string literal. */
+function escGQL(v) {
+  return String(v == null ? "" : v).replace(/'/g, "''");
+}
+
+/* Resolve {normalizedHeaderName -> spreadsheet column id (e.g. "A","B",...)}
+   for a sheet by asking for just one row. Cached per sheetId since a
+   sheet's column layout doesn't change between refreshes. */
+const _colMapCache = {};
+function resolveColumnMap(sheetId) {
+  if (_colMapCache[sheetId]) return Promise.resolve(_colMapCache[sheetId]);
+  return runGvizQuery(sheetId, "select * limit 1").then((dt) => {
+    const map = {};
+    for (let c = 0; c < dt.getNumberOfColumns(); c++) {
+      map[normKey(dt.getColumnLabel(c))] = dt.getColumnId(c);
+    }
+    _colMapCache[sheetId] = map;
+    return map;
+  });
+}
+
+/* Get a column's letter-id from a resolved column map, trying candidate
+   header names in order. Throws a clear error if none match (e.g. the
+   sheet's headers were renamed). */
+function colId(map, candidates) {
+  for (const c of candidates) {
+    const id = map[normKey(c)];
+    if (id) return id;
+  }
+  throw new Error("Could not find a column matching any of: " + candidates.join(", ") +
+    " — check the sheet's header row hasn't been renamed.");
+}
+
+function fetchSheetRows(sheetId, gqlWhere) {
+  const q = "select *" + (gqlWhere ? " where " + gqlWhere : "");
+  return runGvizQuery(sheetId, q).then(dataTableToRows);
+}
+
+function dataTableToRows(dt) {
+  const nCols = dt.getNumberOfColumns();
+  const headers = [];
+  for (let c = 0; c < nCols; c++) headers.push(dt.getColumnLabel(c) || ("col" + c));
+  const headerMap = buildHeaderMap(headers);
+  const rows = [];
+  const nRows = dt.getNumberOfRows();
+  for (let r = 0; r < nRows; r++) {
+    const rawRow = {};
+    for (let c = 0; c < nCols; c++) {
+      let v = dt.getValue(r, c);
+      if (v instanceof Date) v = v.toISOString();
+      rawRow[headers[c]] = v;
+    }
+    rows.push(normalizeRow(rawRow, headerMap));
+  }
+  return rows;
+}
+
+/* Normalize one raw CSV row (target or sales) into a flat, typed object with a
+   consistent field set regardless of small header naming differences. */
+function normalizeRow(row, headerMap) {
+  const agency     = getField(row, headerMap, ["Agency"]);
+  const brand      = getField(row, headerMap, ["Brand"]);
+  const subCat     = getField(row, headerMap, ["SubCategory", "Sub Category", "Sub Cat"]);
+  const prodGroup  = getField(row, headerMap, ["Product Group"]); // Food / Non Food
+  const itemCode   = getField(row, headerMap, ["Item Code"]);
+  const itemDesc   = getField(row, headerMap, ["Item Desc"]);
+  const promoReg   = getField(row, headerMap, ["Promo_Regular ?", "Promo_Regular", "Promo Regular"]);
+  const collector  = getField(row, headerMap, ["Collector"]); // salesman username
+  const custGroup  = getField(row, headerMap, ["Cust Group"]);
+  const custCode   = getField(row, headerMap, ["Cust Site Code"]);
+  const custSite   = getField(row, headerMap, ["Cust Site"]);
+  const state      = getField(row, headerMap, ["State"]);
+  const channel    = getField(row, headerMap, ["Channel"]);
+  const custType   = getField(row, headerMap, ["Cust Type"]);
+  const yr         = getField(row, headerMap, ["Yr"]);
+  const mnth       = getField(row, headerMap, ["Mnth"]);
+  const day        = getField(row, headerMap, ["Day"]);
+  const salesVal   = parseNum(getField(row, headerMap, ["Sales"]));
+  const shippedCs  = parseNum(getField(row, headerMap, ["Shipped Cases"]));
+  const retQtyCs   = parseNum(getField(row, headerMap, ["Return Qty(Cases)", "Return Qty (Cases)"]));
+  const retQtyPcs  = parseNum(getField(row, headerMap, ["Return Qty(Pcs)", "Return Qty (Pcs)"]));
+  const retVal     = parseNum(getField(row, headerMap, ["Return Val"]));
+  const entry      = getField(row, headerMap, ["ENTRY"]);
+  const managers   = getField(row, headerMap, ["MANAGERS"]);
+  const kcGroup    = getField(row, headerMap, ["KC GROUP"]);
+  const dept       = getField(row, headerMap, ["DEPT"]);
+  const type       = getField(row, headerMap, ["TYPE"]); // PURCHASE / RETURN (sales file) or TARGET (target file)
+  const type2      = getField(row, headerMap, ["TYPE 2"]); // KC / DELICIO / TWINNING / KDD / NON KC grouping
+  const group      = getField(row, headerMap, ["GROUP"]); // Major / Other (currently blank)
+
+  return {
+    agency: String(agency).trim(),
+    brand: String(brand).trim(),
+    subCat: String(subCat).trim(),
+    prodGroup: String(prodGroup).trim(),
+    itemCode: String(itemCode).trim(),
+    itemDesc: String(itemDesc).trim(),
+    promoReg: String(promoReg).trim().toUpperCase(),
+    collector: String(collector).trim(),
+    custGroup: String(custGroup).trim(),
+    custCode: String(custCode).trim(),
+    custSite: String(custSite).trim(),
+    state: String(state).trim(),
+    channel: String(channel).trim(),
+    custType: String(custType).trim(),
+    yr: String(yr).trim(),
+    mnth: String(mnth).trim(),
+    day: String(day).trim(),
+    sales: salesVal,
+    shippedCases: shippedCs,
+    returnQtyCases: retQtyCs,
+    returnQtyPcs: retQtyPcs,
+    returnVal: retVal,
+    entry: String(entry).trim(),
+    managers: String(managers).trim(),
+    kcGroup: String(kcGroup).trim(),
+    dept: String(dept).trim(),
+    type: normVal(type), // lower-cased for matching: 'purchase' / 'return' / 'target'
+    type2: String(type2).trim(),
+    group: String(group).trim(),
+    // derived
+    lastDate: buildDateKey(yr, mnth, day),
+  };
+}
+
+function MONTH_NUM(mnthStr) {
+  const m = normVal(mnthStr).slice(0, 3);
+  const map = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  return map[m] || 0;
+}
+function buildDateKey(yr, mnth, day) {
+  const y = parseInt(yr, 10) || 0;
+  const m = MONTH_NUM(mnth);
+  const d = parseInt(day, 10) || 1;
+  if (!y || !m) return null;
+  return y * 10000 + m * 100 + d; // sortable int, e.g. 20260815
+}
+function dateKeyToLabel(k) {
+  if (!k) return "-";
+  const y = Math.floor(k / 10000);
+  const m = Math.floor((k % 10000) / 100);
+  const d = k % 100;
+  const names = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${d} ${names[m]} ${y}`;
+}
+
+/* ---------------------------------------------------------------------
+   5. ROLE-BASED SCOPING + FILTERS, AS A GQL WHERE CLAUSE
+
+   Because the TARGET sheet is too large to pull client-side (see above),
+   role scoping and every dashboard filter get compiled into a GQL WHERE
+   clause and sent to Google's servers, which do the filtering. `colMap`
+   is the {field -> column letter} map for whichever sheet this clause
+   will run against (TARGET and SALES have different column layouts).
+   `opts.forSales` additionally restricts to real transaction rows only
+   (see note on the SALES sheet's TYPE column below).
+   --------------------------------------------------------------------- */
+function eqAny(colLetter, values) {
+  return "(" + values.map((v) => `${colLetter} = '${escGQL(v)}'`).join(" or ") + ")";
+}
+
+/* Like eqAny, but for columns that are numeric in the sheet (e.g. "Item
+   Code", "Cust Site Code" are both stored as numbers, confirmed against
+   the real sheet). GQL rejects/never-matches a numeric column compared
+   to a quoted string literal, so purely-numeric-looking values are
+   emitted unquoted here. This was the exact cause of "Dist Target"
+   silently coming back 0 everywhere restrictToKeys was used. */
+function eqAnyNumericSafe(colLetter, values) {
+  return "(" + values.map((v) => {
+    const s = String(v);
+    return (s !== "" && !isNaN(Number(s))) ? `${colLetter} = ${Number(s)}` : `${colLetter} = '${escGQL(s)}'`;
+  }).join(" or ") + ")";
+}
+
+function buildGqlWhere(colMap, user, filters, opts) {
+  opts = opts || {};
+  const clauses = [];
+
+  // Role scope
+  if (!FULL_ACCESS_TITLES.includes(user.title)) {
+    if (user.title === "MANAGER") {
+      clauses.push(eqAny(colId(colMap, ["MANAGERS"]), [user.username]));
+    } else {
+      clauses.push(eqAny(colId(colMap, ["Collector"]), [user.username]));
+    }
+  }
+
+  // Global filters
+  if (filters.agency && filters.agency.length) clauses.push(eqAny(colId(colMap, ["Agency"]), filters.agency));
+  if (filters.prodGroup && filters.prodGroup !== "ALL") clauses.push(eqAny(colId(colMap, ["Product Group"]), [filters.prodGroup]));
+  if (filters.promoReg && filters.promoReg !== "ALL") clauses.push(eqAny(colId(colMap, ["Promo_Regular ?", "Promo_Regular"]), [filters.promoReg]));
+  if (filters.custGroup && filters.custGroup.length) clauses.push(eqAny(colId(colMap, ["Cust Group"]), filters.custGroup));
+  if (filters.majorOther && filters.majorOther !== "ALL") clauses.push(eqAny(colId(colMap, ["GROUP"]), [filters.majorOther]));
+  // Salesmen/Managers filters only make sense (and are only shown) for manager-tier users
+  if (filters.salesmen && filters.salesmen.length) clauses.push(eqAny(colId(colMap, ["Collector"]), filters.salesmen));
+  if (filters.managers && filters.managers.length) clauses.push(eqAny(colId(colMap, ["MANAGERS"]), filters.managers));
+
+  // Search box: substring match across text fields; exact match against the
+  // numeric Item Code / Cust Site Code columns (GQL's CONTAINS needs a string
+  // column, so a numeric-column substring match isn't supported server-side).
+  if (filters.search && filters.search.trim()) {
+    const term = filters.search.trim();
+    const q = escGQL(term);
+    const textFields = [
+      ["Item Desc"], ["Cust Site"], ["Agency"], ["Brand"], ["SubCategory", "Sub Category"],
+    ];
+    const ors = textFields.map((cands) => `upper(${colId(colMap, cands)}) contains upper('${q}')`);
+    const num = parseFloat(term);
+    if (!isNaN(num)) {
+      ors.push(`${colId(colMap, ["Item Code"])} = ${num}`);
+      ors.push(`${colId(colMap, ["Cust Site Code"])} = ${num}`);
+    }
+    clauses.push("(" + ors.join(" or ") + ")");
+  }
+
+  // NOTE: an earlier version excluded SALES rows with TYPE="TARGET" here,
+  // assuming they were unrelated noise. Verified against the real sheet
+  // that assumption was wrong — TYPE="TARGET" rows carry real Sales and
+  // Return Val figures that the user's own reference numbers include
+  // (confirmed by matching their Achievement and Return totals for a
+  // specific salesman almost to the decimal once these rows were added
+  // back in). So every row is now fetched regardless of TYPE; opts.forSales
+  // is kept as a no-op parameter for callers rather than removed outright,
+  // in case a future month's sheet needs a real exclusion after all.
+  void opts.forSales;
+
+  return clauses.length ? clauses.join(" and ") : null; // null = no WHERE needed at all
+}
+
+/* Join possibly-null clause fragments with AND, omitting empty ones.
+   Returns null if every fragment was empty (caller should skip WHERE
+   entirely rather than send a clause GQL might reject, e.g. "1=1"). */
+function andJoin(...parts) {
+  const nonEmpty = parts.filter(Boolean);
+  return nonEmpty.length ? nonEmpty.join(" and ") : null;
+}
+function whereSuffix(clause) {
+  return clause ? " where " + clause : "";
+}
+
+/* ---------------------------------------------------------------------
+   6. CLIENT-SIDE FILTER APPLICATION (SALES rows only)
+   The SALES sheet is small enough to fetch as raw rows once per
+   month/login (already scoped to this user's role + real transactions
+   via buildGqlWhere), then re-filtered instantly in the browser as the
+   user toggles filters — no extra network round-trip needed for this
+   part. filterState fields: agency[], prodGroup, promoReg, salesmen[],
+   managers[], custGroup[], majorOther, search
+   --------------------------------------------------------------------- */
+function applyFilters(rows, fs) {
+  return rows.filter((r) => {
+    if (fs.agency && fs.agency.length && !fs.agency.includes(r.agency)) return false;
+    if (fs.prodGroup && fs.prodGroup !== "ALL" && normVal(r.prodGroup) !== normVal(fs.prodGroup)) return false;
+    if (fs.promoReg && fs.promoReg !== "ALL" && r.promoReg !== fs.promoReg) return false;
+    if (fs.salesmen && fs.salesmen.length && !fs.salesmen.includes(r.collector)) return false;
+    if (fs.managers && fs.managers.length && !fs.managers.includes(r.managers)) return false;
+    if (fs.custGroup && fs.custGroup.length && !fs.custGroup.includes(r.custGroup)) return false;
+    if (fs.majorOther && fs.majorOther !== "ALL" && normVal(r.group) !== normVal(fs.majorOther)) return false;
+    if (fs.search && fs.search.trim()) {
+      const q = normVal(fs.search);
+      const hay = normVal(r.custCode) + "|" + normVal(r.itemCode) + "|" + normVal(r.itemDesc) + "|" +
+                  normVal(r.custSite) + "|" + normVal(r.agency) + "|" + normVal(r.brand) + "|" + normVal(r.subCat);
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+/* ---------------------------------------------------------------------
+   7. METRIC COMPUTATION (SALES side — small dataset, computed in the browser)
+
+   The SALES sheet's TYPE column has three values: PURCHASE, RETURN, and
+   TARGET. Confirmed against the real sheet (matching a salesman's known-
+   correct Achievement and Return totals from the user's own reference
+   tool) that TARGET-type rows are real transactions too — NOT noise to
+   exclude — so every "achieved distribution" / "last supply" calculation
+   below treats PURCHASE and TARGET rows the same way, and only RETURN
+   rows are excluded (per the original spec: distribution must exclude
+   returns). The `purchase` bucket below is really "everything that isn't
+   a return."
+   --------------------------------------------------------------------- */
+function splitSalesRows(salesRows) {
+  const purchase = []; // PURCHASE + TARGET rows: real, distribution-eligible transactions
+  const ret = [];       // RETURN rows only
+  for (const r of salesRows) {
+    if (r.type === "return") ret.push(r);
+    else purchase.push(r);
+  }
+  return { purchase, ret };
+}
+
+function sum(rows, field) {
+  let t = 0;
+  for (const r of rows) t += r[field];
+  return t;
+}
+
+function lastSaleDate(salesRows) {
+  let max = null;
+  for (const r of salesRows) {
+    if (r.lastDate && (max === null || r.lastDate > max)) max = r.lastDate;
+  }
+  return max;
+}
+function lastSupplyDate(salesRows) {
+  const { purchase } = splitSalesRows(salesRows);
+  return lastSaleDate(purchase);
+}
+
+const KEY_SKU = (r) => r.itemCode;
+const KEY_OUTLET = (r) => r.custCode;
+
+/* Group an array of rows by a field, returning Map<value, rows[]> */
+function groupBy(rows, field) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = r[field];
+    if (!m.has(k)) m.set(k, []);
+    m.get(k).push(r);
+  }
+  return m;
+}
+
+/* Achievement = the Sales column's own value summed across BOTH purchase
+   and return rows together — no separate purchase/return split, and no
+   subtracting one from the other. (Per explicit instruction: return
+   rows already carry the correct signed Sales value in the source
+   sheet, so a plain sum nets them out correctly on its own; splitting
+   and subtracting was actively wrong and is no longer done anywhere.) */
+function netAchSum(salesSlice) {
+  return sum(salesSlice, "sales");
+}
+/* Return column is still shown on its own for visibility (per the
+   original spec: "still display return values in every table") — this
+   is display-only and has no effect on the achievement figure above.
+   Uses the sheet's own dedicated "Return Val" column summed across ALL
+   rows in scope (not just TYPE=RETURN rows) — confirmed against the real
+   sheet that TYPE=TARGET rows also carry a real, nonzero Return Val that
+   the user's own reference total includes; summing Return Val everywhere
+   naturally comes out to 0 for rows that have no return component. */
+function returnDisplaySum(salesSlice) {
+  return Math.abs(sum(salesSlice, "returnVal"));
+}
+
+/* Build one display row by combining a pre-aggregated TARGET-side result
+   (fetched from Google's servers: {target, distTarget}) with a slice of
+   the (small, already-fetched) SALES rows for the same group. */
+function mergeRow(label, targetAgg, salesSlice, distKeyFn) {
+  const { purchase } = splitSalesRows(salesSlice);
+  const net = netAchSum(salesSlice);
+  const returnSum = returnDisplaySum(salesSlice);
+  const target = targetAgg ? targetAgg.target : 0;
+  const distTarget = targetAgg ? targetAgg.distTarget : 0;
+  const btg = target - net;
+  const achPct = target > 0 ? (net / target) * 100 : (net > 0 ? 100 : 0);
+  // Distribution stays PURCHASE-only (excluding returns), per the original spec.
+  const achSet = new Set();
+  purchase.forEach((r) => { if (r.sales > 0) achSet.add(distKeyFn(r)); });
+  const distAch = achSet.size;
+  const distPct = distTarget > 0 ? (distAch / distTarget) * 100 : 0;
+  return {
+    label, target, return: returnSum, net, btg, achPct,
+    distTarget, distAch, distPct,
+    lastSale: lastSaleDate(salesSlice),
+    lastSupply: lastSupplyDate(salesSlice),
+  };
+}
+
+/* ---------------------------------------------------------------------
+   8. TARGET-SIDE AGGREGATION (Google Query Language, runs server-side)
+
+   distTarget/distAch "distribution" counts rely on one assumption: the
+   TARGET sheet has exactly one row per (salesman, SKU, outlet) —
+   i.e. no duplicate rows for the same combination. Under that assumption
+   COUNT(anyColumn) after GROUP BY correctly gives a distinct-combination
+   count without needing SQL's unavailable COUNT(DISTINCT ...).
+   --------------------------------------------------------------------- */
+
+/* Single aggregate (no grouping): {target, distTarget} for one WHERE scope. */
+function targetOverallAgg(sheetId, colMap, whereClause) {
+  const salesId = colId(colMap, ["Sales"]);
+  const w = andJoin(whereClause, `${salesId} > 0`);
+  const q = `select sum(${salesId}), count(${salesId})${whereSuffix(w)}`;
+  return runGvizQuery(sheetId, q).then((dt) => {
+    if (!dt.getNumberOfRows()) return { target: 0, distTarget: 0 };
+    return { target: dt.getValue(0, 0) || 0, distTarget: dt.getValue(0, 1) || 0 };
+  });
+}
+
+/* Grouped aggregate: target sum per distinct value of `groupField`.
+   Returns Map<key, {target}> (row-count/"distTarget" added separately
+   via targetDistinctSecondary since a single-level GROUP BY overcounts
+   distribution — many outlets can share one agency, for example). */
+function targetGroupSum(sheetId, colMap, groupField, whereClause, opts) {
+  opts = opts || {};
+  const gId = colId(colMap, [groupField]);
+  const salesId = colId(colMap, ["Sales"]);
+  const w = andJoin(whereClause, `${salesId} > 0`);
+  let q = `select ${gId}, sum(${salesId})${whereSuffix(w)} group by ${gId} order by sum(${salesId}) desc`;
+  if (opts.limit) q += ` limit ${opts.limit}`;
+  return runGvizQuery(sheetId, q).then((dt) => {
+    const map = new Map();
+    for (let r = 0; r < dt.getNumberOfRows(); r++) {
+      map.set(String(dt.getValue(r, 0)), { target: dt.getValue(r, 1) || 0 });
+    }
+    return map;
+  });
+}
+
+/* Same as targetGroupSum, but also pulls a human-readable label column
+   (e.g. "Cust Site" name for a "Cust Site Code" grouping, or "Item Desc"
+   for an "Item Code" grouping) straight from the TARGET sheet itself —
+   not from the small SALES rows, which only cover outlets/SKUs with an
+   actual transaction this month. That mismatch was exactly why the
+   Outlet/SKU columns sometimes showed a code and sometimes a name: an
+   outlet with zero sales this month has no SALES row to pull a name
+   from. Pulling the label from TARGET (which has one row per every
+   outlet/SKU regardless of whether it sold anything) means every row
+   gets a consistent, real label. Assumes one code maps to one label. */
+function targetGroupSumWithLabel(sheetId, colMap, groupField, labelField, whereClause, opts) {
+  opts = opts || {};
+  const gId = colId(colMap, [groupField]);
+  const lId = colId(colMap, [labelField]);
+  const salesId = colId(colMap, ["Sales"]);
+  const w = andJoin(whereClause, `${salesId} > 0`);
+  let q = `select ${gId}, ${lId}, sum(${salesId})${whereSuffix(w)} group by ${gId}, ${lId} order by sum(${salesId}) desc`;
+  if (opts.limit) q += ` limit ${opts.limit}`;
+  return runGvizQuery(sheetId, q).then((dt) => {
+    const map = new Map();
+    for (let r = 0; r < dt.getNumberOfRows(); r++) {
+      const key = String(dt.getValue(r, 0));
+      const rawLabel = dt.getValue(r, 1);
+      const label = (rawLabel != null && String(rawLabel).trim() !== "") ? String(rawLabel).trim() : key;
+      map.set(key, { target: dt.getValue(r, 2) || 0, label });
+    }
+    return map;
+  });
+}
+
+/* Two-level GROUP BY (primaryField, secondaryField), tallied client-side
+   into Map<primaryValue, distinctSecondaryCount>. Result size is bounded
+   by (#distinct primary values * #distinct secondary values), which stays
+   small even though the underlying sheet has hundreds of thousands of rows. */
+function targetDistinctSecondary(sheetId, colMap, primaryField, secondaryField, whereClause, restrictToKeys) {
+  const pId = colId(colMap, [primaryField]);
+  const sId = colId(colMap, [secondaryField]);
+  const salesId = colId(colMap, ["Sales"]);
+  const restrictClause = (restrictToKeys && restrictToKeys.length) ? eqAnyNumericSafe(pId, restrictToKeys) : null;
+  const w = andJoin(whereClause, `${salesId} > 0`, restrictClause);
+  // Google's query engine rejects a GROUP BY with no aggregate function at
+  // all (CANNOT_GROUP_WITHOUT_AGG) even when every selected column is a
+  // group key — so a harmless count(...) is added and simply ignored.
+  const q = `select ${pId}, ${sId}, count(${sId})${whereSuffix(w)} group by ${pId}, ${sId}`;
+  return runGvizQuery(sheetId, q).then((dt) => {
+    const map = new Map();
+    for (let r = 0; r < dt.getNumberOfRows(); r++) {
+      const k = String(dt.getValue(r, 0));
+      map.set(k, (map.get(k) || 0) + 1);
+    }
+    return map;
+  });
+}
+
+/* Total count of distinct (field1, field2) pairs within a WHERE scope —
+   used for the Overall KPI card's distribution denominator. Doesn't rely
+   on the "one row per combo" shortcut the single-column COUNT() does,
+   because the same SKU can legitimately appear at the same outlet under
+   more than one agency/row. */
+function targetDistinctPairCount(sheetId, colMap, field1, field2, whereClause) {
+  const id1 = colId(colMap, [field1]);
+  const id2 = colId(colMap, [field2]);
+  const salesId = colId(colMap, ["Sales"]);
+  const w = andJoin(whereClause, `${salesId} > 0`);
+  const q = `select ${id1}, ${id2}, count(${id2})${whereSuffix(w)} group by ${id1}, ${id2}`; // see note above re: CANNOT_GROUP_WITHOUT_AGG
+  return runGvizQuery(sheetId, q).then((dt) => dt.getNumberOfRows());
+}
+
+/* Count of distinct values of a single column within a WHERE scope
+   (restricted to rows with a positive target, same as the other
+   target-side aggregates). "Distribution" throughout this dashboard
+   means distinct OUTLET coverage (per explicit request), so this is
+   used with field="Cust Site Code" for every aggregate-level table
+   (Overall / Agency / Promo). Per-row tables (Top Customers, Top SKUs)
+   use targetDistinctSecondary instead, since their distribution is
+   naturally the *other* dimension (SKUs-per-outlet / outlets-per-SKU). */
+function targetDistinctCount(sheetId, colMap, field, whereClause) {
+  const id = colId(colMap, [field]);
+  const salesId = colId(colMap, ["Sales"]);
+  const w = andJoin(whereClause, `${salesId} > 0`);
+  const q = `select ${id}, count(${id})${whereSuffix(w)} group by ${id}`; // see note above re: CANNOT_GROUP_WITHOUT_AGG
+  return runGvizQuery(sheetId, q).then((dt) => dt.getNumberOfRows());
+}
+
+/* Distinct values of one column within a WHERE scope — used to populate
+   filter dropdown options without pulling any raw target rows. */
+function targetDistinctValues(sheetId, colMap, field, whereClause) {
+  const id = colId(colMap, [field]);
+  const q = `select ${id}, count(${id})${whereSuffix(whereClause)} group by ${id} order by ${id}`; // see note above re: CANNOT_GROUP_WITHOUT_AGG
+  return runGvizQuery(sheetId, q).then((dt) => {
+    const vals = [];
+    for (let r = 0; r < dt.getNumberOfRows(); r++) {
+      const v = dt.getValue(r, 0);
+      if (v !== null && v !== "") vals.push(String(v));
+    }
+    return vals;
+  });
+}
+
+/* ---------------------------------------------------------------------
+   9. SUMMARY PAGE DATA BUILDER (async — issues several small GQL queries
+   against the TARGET sheet, merges each with the already-fetched SALES
+   rows for the same scope).
+   --------------------------------------------------------------------- */
+async function buildSummaryData(targetSheetId, targetColMap, whereT, salesRowsScoped, user) {
+  const out = {};
+
+  // Overall KPIs. "Distribution" = distinct OUTLET coverage (not SKU, and
+  // not SKU×outlet pairs — per explicit instruction), Achievement = the
+  // Sales column summed across purchase+return together (see netAchSum).
+  const [overallAgg, overallDistTarget] = await Promise.all([
+    targetOverallAgg(targetSheetId, targetColMap, whereT),
+    targetDistinctCount(targetSheetId, targetColMap, "Cust Site Code", whereT),
+  ]);
+  const { purchase } = splitSalesRows(salesRowsScoped);
+  const net = netAchSum(salesRowsScoped);
+  const returnSum = returnDisplaySum(salesRowsScoped);
+  const achSetOverall = new Set();
+  purchase.forEach((r) => { if (r.sales > 0) achSetOverall.add(r.custCode); }); // distinct outlets achieved
+  out.overall = {
+    target: overallAgg.target, return: returnSum, net,
+    btg: overallAgg.target - net,
+    achPct: overallAgg.target > 0 ? (net / overallAgg.target) * 100 : (net > 0 ? 100 : 0),
+    distTarget: overallDistTarget, distAch: achSetOverall.size,
+    distPct: overallDistTarget > 0 ? (achSetOverall.size / overallDistTarget) * 100 : 0,
+  };
+
+  // Agency-wise — distribution = distinct outlets within each agency.
+  const [agencySumMap, agencyDistMap] = await Promise.all([
+    targetGroupSum(targetSheetId, targetColMap, "Agency", whereT),
+    targetDistinctSecondary(targetSheetId, targetColMap, "Agency", "Cust Site Code", whereT),
+  ]);
+  const sByAgency = groupBy(salesRowsScoped, "agency");
+  const agencyKeys = new Set([...agencySumMap.keys(), ...sByAgency.keys()]);
+  out.byAgency = [...agencyKeys].filter(Boolean).map((a) =>
+    mergeRow(a, { target: (agencySumMap.get(a) || {}).target || 0, distTarget: agencyDistMap.get(a) || 0 }, sByAgency.get(a) || [], KEY_OUTLET)
+  ).sort((x, y) => y.target - x.target);
+
+  // Promo / Regular — distribution = distinct outlets within each type.
+  const [promoSumMap, promoDistMap] = await Promise.all([
+    targetGroupSum(targetSheetId, targetColMap, "Promo_Regular ?", whereT),
+    targetDistinctSecondary(targetSheetId, targetColMap, "Promo_Regular ?", "Cust Site Code", whereT),
+  ]);
+  const sByPromo = groupBy(salesRowsScoped, "promoReg");
+  const promoKeys = new Set([...promoSumMap.keys(), ...sByPromo.keys()]);
+  out.byPromo = [...promoKeys].filter(Boolean).map((p) =>
+    mergeRow(p, { target: (promoSumMap.get(p) || {}).target || 0, distTarget: promoDistMap.get(p) || 0 }, sByPromo.get(p) || [], KEY_OUTLET)
+  ).sort((x, y) => y.target - x.target);
+
+  // Top 10 Customers by target — each row IS one outlet, so its own
+  // distribution naturally means SKU coverage at that outlet. Label is
+  // always the outlet's Cust Site NAME (never the code), pulled from the
+  // TARGET sheet so it's there even for an outlet with zero sales.
+  const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", whereT, { limit: 10 });
+  const topCustCodes = [...custSumMap.keys()];
+  const custDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Cust Site Code", "Item Code", whereT, topCustCodes);
+  const sByCust = groupBy(salesRowsScoped, "custCode");
+  out.topCustomers = topCustCodes.map((code) =>
+    mergeRow(custSumMap.get(code).label, { target: custSumMap.get(code).target, distTarget: custDistMap.get(code) || 0 }, sByCust.get(code) || [], KEY_SKU)
+  );
+
+  // Top 20 SKUs by target — each row IS one SKU, so its own distribution
+  // naturally means outlet coverage for that SKU. Label is always the
+  // Item DESCRIPTION (never the code), same reasoning as above.
+  const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", whereT, { limit: 20 });
+  const topSkuCodes = [...skuSumMap.keys()];
+  const skuDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Item Code", "Cust Site Code", whereT, topSkuCodes);
+  const sBySku = groupBy(salesRowsScoped, "itemCode");
+  out.topSkus = topSkuCodes.map((code) =>
+    mergeRow(skuSumMap.get(code).label, { target: skuSumMap.get(code).target, distTarget: skuDistMap.get(code) || 0 }, sBySku.get(code) || [], KEY_OUTLET)
+  );
+
+  // Manager / GM / BDM / TME only: salesmen breakdown table (already kept
+  // outlet and SKU distribution as two clearly separate column groups).
+  if (user.title === "MANAGER" || FULL_ACCESS_TITLES.includes(user.title)) {
+    const [salesmanSumMap, salesmanOutletDistMap, salesmanSkuDistMap] = await Promise.all([
+      targetGroupSum(targetSheetId, targetColMap, "Collector", whereT),
+      targetDistinctSecondary(targetSheetId, targetColMap, "Collector", "Cust Site Code", whereT),
+      targetDistinctSecondary(targetSheetId, targetColMap, "Collector", "Item Code", whereT),
+    ]);
+    const sBySales = groupBy(salesRowsScoped, "collector");
+    const salesmenKeys = new Set([...salesmanSumMap.keys(), ...sBySales.keys()]);
+    out.bySalesman = [...salesmenKeys].filter(Boolean).map((sName) => {
+      const sSlice = sBySales.get(sName) || [];
+      const { purchase: p2 } = splitSalesRows(sSlice);
+      const net2 = netAchSum(sSlice);
+      const returnSum2 = returnDisplaySum(sSlice);
+      const target2 = (salesmanSumMap.get(sName) || {}).target || 0;
+      const distOutletTarget = salesmanOutletDistMap.get(sName) || 0;
+      const distSkuTarget = salesmanSkuDistMap.get(sName) || 0;
+      const achOutletSet = new Set(); const achSkuSet = new Set();
+      p2.forEach((r) => { if (r.sales > 0) { achOutletSet.add(r.custCode); achSkuSet.add(r.itemCode); } });
+      return {
+        label: sName, target: target2, return: returnSum2, net: net2,
+        btg: target2 - net2, achPct: target2 > 0 ? (net2 / target2) * 100 : (net2 > 0 ? 100 : 0),
+        distOutlet: { distTarget: distOutletTarget, distAch: achOutletSet.size, distPct: distOutletTarget > 0 ? (achOutletSet.size / distOutletTarget) * 100 : 0 },
+        distSku: { distTarget: distSkuTarget, distAch: achSkuSet.size, distPct: distSkuTarget > 0 ? (achSkuSet.size / distSkuTarget) * 100 : 0 },
+      };
+    }).sort((a, b) => b.target - a.target);
+  }
+
+  return out;
+}
+
+/* ======================================================================
+   UI LAYER — login, shell, filters, search, summary page rendering
+   ====================================================================== */
+
+const state = {
+  user: null,
+  month: MONTHS[MONTHS.length - 1].key, // default = latest month
+  // month -> { salesRows, targetColMap, salesColMap, targetSheetId, salesSheetId, filterOptions, fetchedAt }
+  cache: {},
+  loading: false,
+  error: null,
+  summaryLoading: false,
+  summaryError: null,
+  filters: { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" },
+  sort: {}, // tableId -> { col, dir }
+  autoRefreshTimer: null,
+  _contentReqId: 0,
+  _contentDebounceTimer: null,
+};
+
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+function $(sel, root) { return (root || document).querySelector(sel); }
+function el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  if (attrs) for (const k in attrs) {
+    if (k === "class") e.className = attrs[k];
+    else if (k === "html") e.innerHTML = attrs[k];
+    else if (k.startsWith("on") && typeof attrs[k] === "function") e.addEventListener(k.slice(2), attrs[k]);
+    else e.setAttribute(k, attrs[k]);
+  }
+  (children || []).forEach((c) => { if (c != null) e.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+  return e;
+}
+
+/* ---------------------------------------------------------------------
+   LOGIN SCREEN
+   --------------------------------------------------------------------- */
+function renderLogin(errorMsg) {
+  const root = $("#root");
+  root.innerHTML = "";
+
+  const salesmen = USERS.filter((u) => u.title === "SALES MEN");
+  const managers = USERS.filter((u) => u.title === "MANAGER");
+  const leadership = USERS.filter((u) => FULL_ACCESS_TITLES.includes(u.title));
+
+  const select = el("select", { id: "loginUser", class: "input" }, [
+    el("option", { value: "" }, ["Select your name..."]),
+    el("optgroup", { label: "Salesmen" }, salesmen.map((u) => el("option", { value: u.username }, [u.username]))),
+    el("optgroup", { label: "Managers" }, managers.map((u) => el("option", { value: u.username }, [u.username]))),
+    el("optgroup", { label: "Leadership" }, leadership.map((u) => el("option", { value: u.username }, [u.username]))),
+  ]);
+  const pass = el("input", { id: "loginPass", class: "input", type: "password", placeholder: "Password", inputmode: "numeric" });
+
+  const card = el("div", { class: "login-card" }, [
+    el("div", { class: "login-title" }, ["ZBM Sales Dashboard"]),
+    el("div", { class: "login-sub" }, ["Sign in with your username and password"]),
+    errorMsg ? el("div", { class: "login-error" }, [errorMsg]) : null,
+    el("label", { class: "field-label" }, ["Username"]),
+    select,
+    el("label", { class: "field-label" }, ["Password"]),
+    pass,
+    el("button", { class: "btn btn-primary btn-block", id: "loginBtn" }, ["Log In"]),
+  ]);
+
+  root.appendChild(el("div", { class: "login-wrap" }, [card]));
+
+  const doLogin = () => {
+    const uname = select.value;
+    const pwd = pass.value.trim();
+    if (!uname) { renderLogin("Please select your name."); return; }
+    const match = USERS.find((u) => u.username === uname && String(u.password) === pwd);
+    if (!match) { renderLogin("Incorrect password. Please try again."); return; }
+    state.user = match;
+    renderAppShell();
+    loadMonth(state.month);
+  };
+  $("#loginBtn").addEventListener("click", doLogin);
+  pass.addEventListener("keydown", (e) => { if (e.key === "Enter") doLogin(); });
+}
+
+function logout() {
+  if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
+  state.user = null;
+  state.cache = {};
+  state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
+  renderLogin();
+}
+
+/* ---------------------------------------------------------------------
+   DATA LOADING
+
+   The TARGET sheet (200,000+ rows) is never pulled raw — see dashboard.js
+   section 4. Here we only: (1) resolve each sheet's column-letter map,
+   (2) pull the small SALES sheet as real rows (already scoped to this
+   user's role + real transactions), and (3) pull small distinct-value
+   lists to populate the filter dropdowns. The heavy per-table numbers
+   are fetched on demand inside renderContent().
+   --------------------------------------------------------------------- */
+async function loadMonth(monthKey, silent) {
+  const cfg = MONTHS.find((m) => m.key === monthKey);
+  if (!cfg) return;
+  if (!silent) { state.loading = true; state.error = null; renderApp(); }
+  try {
+    const [targetColMap, salesColMap] = await Promise.all([
+      resolveColumnMap(cfg.targetId),
+      resolveColumnMap(cfg.salesId),
+    ]);
+    const roleWhereTarget = buildGqlWhere(targetColMap, state.user, {});
+    const roleWhereSales = buildGqlWhere(salesColMap, state.user, {}, { forSales: true });
+    const isManagerTier = state.user.title !== "SALES MEN";
+
+    const [salesRows, agencyOpts, custGroupOpts, promoOpts, prodGroupOpts, groupOpts, collectorOpts, managerOpts] = await Promise.all([
+      fetchSheetRows(cfg.salesId, roleWhereSales),
+      targetDistinctValues(cfg.targetId, targetColMap, "Agency", roleWhereTarget),
+      targetDistinctValues(cfg.targetId, targetColMap, "Cust Group", roleWhereTarget),
+      targetDistinctValues(cfg.targetId, targetColMap, "Promo_Regular ?", roleWhereTarget),
+      targetDistinctValues(cfg.targetId, targetColMap, "Product Group", roleWhereTarget),
+      targetDistinctValues(cfg.targetId, targetColMap, "GROUP", roleWhereTarget),
+      isManagerTier ? targetDistinctValues(cfg.targetId, targetColMap, "Collector", roleWhereTarget) : Promise.resolve([]),
+      isManagerTier ? targetDistinctValues(cfg.targetId, targetColMap, "MANAGERS", roleWhereTarget) : Promise.resolve([]),
+    ]);
+
+    state.cache[monthKey] = {
+      salesRows, targetColMap, salesColMap,
+      targetSheetId: cfg.targetId, salesSheetId: cfg.salesId,
+      filterOptions: { agency: agencyOpts, custGroup: custGroupOpts, promoReg: promoOpts, prodGroup: prodGroupOpts, group: groupOpts, collector: collectorOpts, managers: managerOpts },
+      fetchedAt: new Date(),
+    };
+    state.loading = false;
+    state.error = null;
+  } catch (err) {
+    state.loading = false;
+    state.error = "Could not load data for " + cfg.label + ": " + err.message + " Try Refresh.";
+  }
+  renderApp();
+  armAutoRefresh();
+}
+
+function armAutoRefresh() {
+  if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
+  state.autoRefreshTimer = setInterval(() => { loadMonth(state.month, true); }, REFRESH_INTERVAL_MS);
+}
+
+/* ---------------------------------------------------------------------
+   APP SHELL
+   --------------------------------------------------------------------- */
+function renderAppShell() {
+  const root = $("#root");
+  root.innerHTML = "";
+  root.appendChild(el("div", { id: "shell" }, [
+    el("header", { class: "topbar" }, [
+      el("div", { class: "topbar-title" }, ["ZBM Sales Dashboard"]),
+      el("div", { class: "topbar-user" }, [
+        el("span", { class: "user-badge" }, [`${state.user.username} · ${state.user.title}`]),
+        el("button", { class: "btn btn-ghost", onclick: logout }, ["Log out"]),
+      ]),
+    ]),
+    el("div", { id: "statusbar", class: "statusbar" }),
+    el("div", { id: "filterbar", class: "filterbar" }),
+    el("main", { id: "content", class: "content" }),
+  ]));
+}
+
+function renderApp() {
+  if (!state.user) return renderLogin();
+  if (!$("#shell")) renderAppShell();
+  renderStatusBar();
+  renderFilterBar();
+  renderContent();
+}
+
+function renderStatusBar() {
+  const bar = $("#statusbar");
+  bar.innerHTML = "";
+  const cached = state.cache[state.month];
+  const parts = [];
+  if (state.loading) {
+    parts.push(el("span", { class: "status-loading" }, ["Loading live data…"]));
+  } else if (state.error) {
+    parts.push(el("span", { class: "status-error" }, [state.error]));
+  } else if (cached) {
+    parts.push(el("span", { class: "status-ok" }, ["Last updated: " + cached.fetchedAt.toLocaleTimeString() + " (auto-refreshes every 5 min)"]));
+  }
+  parts.push(el("button", { class: "btn btn-small", onclick: () => loadMonth(state.month) }, ["Refresh now"]));
+  bar.appendChild(el("div", { class: "statusbar-inner" }, parts));
+}
+
+/* ---------------------------------------------------------------------
+   FILTER BAR (connected across the whole app; single filters object)
+   --------------------------------------------------------------------- */
+function distinctValues(rows, field) {
+  const s = new Set();
+  rows.forEach((r) => { if (r[field]) s.add(r[field]); });
+  return [...s].sort();
+}
+
+function multiSelectControl(labelText, allOptions, selectedArr, onChange) {
+  const wrap = el("div", { class: "filter-group" });
+  wrap.appendChild(el("div", { class: "filter-label" }, [labelText]));
+  const box = el("div", { class: "multiselect" });
+  const summary = el("button", { class: "multiselect-summary", type: "button" }, [
+    selectedArr.length ? `${selectedArr.length} selected` : "All",
+  ]);
+  const panel = el("div", { class: "multiselect-panel hidden" });
+  allOptions.forEach((opt) => {
+    const id = "ms_" + labelText.replace(/\s+/g, "") + "_" + opt.replace(/[^a-zA-Z0-9]/g, "");
+    const cb = el("input", { type: "checkbox", id });
+    cb.checked = selectedArr.includes(opt);
+    cb.addEventListener("change", () => {
+      const idx = selectedArr.indexOf(opt);
+      if (cb.checked && idx === -1) selectedArr.push(opt);
+      if (!cb.checked && idx !== -1) selectedArr.splice(idx, 1);
+      onChange(selectedArr);
+    });
+    const row = el("label", { class: "multiselect-row", for: id }, [cb, " " + opt]);
+    panel.appendChild(row);
+  });
+  summary.addEventListener("click", () => panel.classList.toggle("hidden"));
+  box.appendChild(summary);
+  box.appendChild(panel);
+  wrap.appendChild(box);
+  return wrap;
+}
+
+function singleSelectControl(labelText, options, currentVal, onChange, disabledNote) {
+  const wrap = el("div", { class: "filter-group" });
+  wrap.appendChild(el("div", { class: "filter-label" }, [labelText]));
+  if (disabledNote) {
+    wrap.appendChild(el("div", { class: "filter-disabled-note" }, [disabledNote]));
+    return wrap;
+  }
+  const sel = el("select", { class: "input input-small" }, options.map((o) =>
+    el("option", { value: o.value, selected: o.value === currentVal ? "selected" : undefined }, [o.label])
+  ));
+  sel.value = currentVal;
+  sel.addEventListener("change", () => onChange(sel.value));
+  wrap.appendChild(sel);
+  return wrap;
+}
+
+function renderFilterBar() {
+  const bar = $("#filterbar");
+  bar.innerHTML = "";
+
+  const cached = state.cache[state.month];
+  const opts = cached ? cached.filterOptions : { agency: [], custGroup: [], promoReg: [], prodGroup: [], group: [], collector: [], managers: [] };
+  const isManagerTier = state.user.title !== "SALES MEN";
+
+  const row1 = el("div", { class: "filterbar-row" });
+  const row2 = el("div", { class: "filterbar-row" });
+
+  // Month
+  row1.appendChild(singleSelectControl("Month", MONTHS.map((m) => ({ value: m.key, label: m.label })), state.month, (v) => {
+    state.month = v;
+    loadMonth(v);
+  }));
+
+  // Agency (multi)
+  row1.appendChild(multiSelectControl("Agency", opts.agency, state.filters.agency, () => scheduleContentRefresh()));
+
+  // Food / Non Food
+  const pgOptions = [{ value: "ALL", label: "All" }, ...opts.prodGroup.map((v) => ({ value: v, label: v }))];
+  row1.appendChild(singleSelectControl("Food / Non-Food", pgOptions, state.filters.prodGroup, (v) => { state.filters.prodGroup = v; scheduleContentRefresh(); }));
+
+  // Promo / Regular
+  const prOptions = [{ value: "ALL", label: "All" }, ...opts.promoReg.map((v) => ({ value: v, label: v }))];
+  row1.appendChild(singleSelectControl("Promo / Regular", prOptions, state.filters.promoReg, (v) => { state.filters.promoReg = v; scheduleContentRefresh(); }));
+
+  // Cust Group (multi)
+  row2.appendChild(multiSelectControl("Cust Group", opts.custGroup, state.filters.custGroup, () => scheduleContentRefresh()));
+
+  // Major / Other (GROUP col) — placeholder until source data populates it
+  if (opts.group.length) {
+    const moOptions = [{ value: "ALL", label: "All" }, ...opts.group.map((v) => ({ value: v, label: v }))];
+    row2.appendChild(singleSelectControl("Major / Other", moOptions, state.filters.majorOther, (v) => { state.filters.majorOther = v; scheduleContentRefresh(); }));
+  } else {
+    row2.appendChild(singleSelectControl("Major / Other", [], "ALL", () => {}, "Not yet available in source data"));
+  }
+
+  // Salesmen + Managers filters — manager tier only
+  if (isManagerTier) {
+    row2.appendChild(multiSelectControl("Salesmen", opts.collector, state.filters.salesmen, () => scheduleContentRefresh()));
+    row2.appendChild(multiSelectControl("Managers", opts.managers, state.filters.managers, () => scheduleContentRefresh()));
+  }
+
+  bar.appendChild(row1);
+  bar.appendChild(row2);
+
+  // Search bar
+  const searchWrap = el("div", { class: "searchbar" });
+  const searchInput = el("input", {
+    class: "input", type: "search",
+    placeholder: "Search site code, item code, item desc, site, agency, brand, sub cat…",
+    value: state.filters.search,
+  });
+  searchInput.addEventListener("input", () => { state.filters.search = searchInput.value; scheduleContentRefresh(); });
+  searchWrap.appendChild(searchInput);
+  bar.appendChild(searchWrap);
+}
+
+// click-outside closes open multiselect panels — registered once (not
+// inside renderFilterBar, which runs on every month/login load and would
+// otherwise stack up a fresh listener each time).
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".multiselect-panel").forEach((p) => {
+    if (!p.classList.contains("hidden") && !p.parentElement.contains(e.target)) p.classList.add("hidden");
+  });
+});
+
+/* ---------------------------------------------------------------------
+   TABLE RENDERING (generic, sortable)
+   --------------------------------------------------------------------- */
+function renderTable(tableId, title, columns, rows) {
+  const wrap = el("div", { class: "table-card" });
+  wrap.appendChild(el("div", { class: "table-title" }, [title]));
+  const sortState = state.sort[tableId] || { col: null, dir: -1 };
+  let sorted = rows.slice();
+  if (sortState.col) {
+    sorted.sort((a, b) => {
+      const va = a[sortState.col], vb = b[sortState.col];
+      if (typeof va === "string" || typeof vb === "string") return String(va).localeCompare(String(vb)) * sortState.dir;
+      return ((va || 0) - (vb || 0)) * sortState.dir;
+    });
+  }
+  const scrollWrap = el("div", { class: "table-scroll" });
+  const table = el("table", { class: "data-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  columns.forEach((c) => {
+    const th = el("th", { class: c.numeric ? "num" : "" }, [c.label + (sortState.col === c.key ? (sortState.dir === 1 ? " ▲" : " ▼") : "")]);
+    th.addEventListener("click", () => {
+      const cur = state.sort[tableId] || { col: null, dir: -1 };
+      state.sort[tableId] = { col: c.key, dir: cur.col === c.key ? -cur.dir : -1 };
+      renderSummaryTables(); // re-sort only — no need to re-fetch
+    });
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  if (!sorted.length) {
+    tbody.appendChild(el("tr", {}, [el("td", { colspan: String(columns.length), class: "empty-row" }, ["No data for the current filters."])]));
+  }
+  sorted.forEach((r) => {
+    const tr = el("tr");
+    columns.forEach((c) => {
+      const val = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
+      tr.appendChild(el("td", { class: c.numeric ? "num" : "" }, [val == null ? "-" : String(val)]));
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scrollWrap.appendChild(table);
+  wrap.appendChild(scrollWrap);
+  return wrap;
+}
+
+const METRIC_COLUMNS = [
+  { key: "label", label: "" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "distTarget", label: "Dist Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "distAch", label: "Dist Ach", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "distPct", label: "Dist %", numeric: true, fmt: (v) => fmtPct(v) },
+];
+
+/* distType: "outlet" or "sku" — which dimension "distribution" counts in
+   this particular table, spelled out in the column headers themselves so
+   it's never ambiguous which one you're looking at. */
+function metricColumnsWithLabel(labelHeader, distType) {
+  const distWord = distType === "sku" ? "SKU" : "Outlet";
+  const cols = METRIC_COLUMNS.map((c) => Object.assign({}, c));
+  cols[0] = { key: "label", label: labelHeader };
+  cols.forEach((c) => {
+    if (c.key === "distTarget") c.label = distWord + " Dist Target";
+    if (c.key === "distAch") c.label = distWord + " Dist Ach";
+    if (c.key === "distPct") c.label = distWord + " Dist %";
+  });
+  return cols;
+}
+
+const SALESMAN_COLUMNS = [
+  { key: "label", label: "Salesman" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "_distOutletTarget", label: "Outlet Dist Target", numeric: true, fmt: (v, r) => fmtNum(r.distOutlet.distTarget, 0) },
+  { key: "_distOutletAch", label: "Outlet Dist Ach", numeric: true, fmt: (v, r) => fmtNum(r.distOutlet.distAch, 0) },
+  { key: "_distOutletPct", label: "Outlet Dist %", numeric: true, fmt: (v, r) => fmtPct(r.distOutlet.distPct) },
+  { key: "_distSkuTarget", label: "SKU Dist Target", numeric: true, fmt: (v, r) => fmtNum(r.distSku.distTarget, 0) },
+  { key: "_distSkuAch", label: "SKU Dist Ach", numeric: true, fmt: (v, r) => fmtNum(r.distSku.distAch, 0) },
+  { key: "_distSkuPct", label: "SKU Dist %", numeric: true, fmt: (v, r) => fmtPct(r.distSku.distPct) },
+];
+
+/* ---------------------------------------------------------------------
+   KPI CARDS
+   --------------------------------------------------------------------- */
+function renderKpiCards(overall) {
+  const cards = [
+    ["Target", fmtNum(overall.target, 0)],
+    ["Achievement (Net)", fmtNum(overall.net, 0)],
+    ["BTG", fmtNum(overall.btg, 0)],
+    ["Ach %", fmtPct(overall.achPct)],
+    ["Return", fmtNum(overall.return, 0)],
+    ["Outlet Distribution Target", fmtNum(overall.distTarget, 0)],
+    ["Outlet Distribution Ach", fmtNum(overall.distAch, 0)],
+    ["Outlet Distribution %", fmtPct(overall.distPct)],
+  ];
+  const wrap = el("div", { class: "kpi-grid" });
+  cards.forEach(([label, val]) => {
+    wrap.appendChild(el("div", { class: "kpi-card" }, [
+      el("div", { class: "kpi-value" }, [val]),
+      el("div", { class: "kpi-label" }, [label]),
+    ]));
+  });
+  return wrap;
+}
+
+/* ---------------------------------------------------------------------
+   MAIN CONTENT (Summary page — Phase 1)
+
+   Filter changes need a fresh round of small GQL queries against the
+   TARGET sheet (it's too large to filter client-side), so rapid filter
+   clicks are debounced into one fetch via scheduleContentRefresh(). A
+   request-id guard discards a stale response if the filters changed
+   again before the previous fetch finished. Sorting a table never
+   re-fetches — it just re-renders the already-fetched summary.
+   --------------------------------------------------------------------- */
+let currentSummary = null;
+
+function scheduleContentRefresh() {
+  if (state._contentDebounceTimer) clearTimeout(state._contentDebounceTimer);
+  state._contentDebounceTimer = setTimeout(() => { fetchAndRenderContent(); }, 350);
+  // Immediately show a lightweight "updating" state so the UI responds instantly.
+  state.summaryLoading = true;
+  renderSummaryTables();
+}
+
+async function fetchAndRenderContent() {
+  const content = $("#content");
+  if (!content) return;
+  const cached = state.cache[state.month];
+  if (!cached) return;
+
+  const reqId = ++state._contentReqId;
+  state.summaryLoading = true;
+  state.summaryError = null;
+  renderSummaryTables();
+
+  try {
+    const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+    const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    const summary = await buildSummaryData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped, state.user);
+    if (reqId !== state._contentReqId) return; // a newer request superseded this one
+    currentSummary = summary;
+    state.summaryLoading = false;
+    state.summaryError = null;
+  } catch (err) {
+    if (reqId !== state._contentReqId) return;
+    state.summaryLoading = false;
+    state.summaryError = "Could not compute summary: " + err.message;
+  }
+  renderSummaryTables();
+}
+
+function renderSummaryTables() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+
+  const cached = state.cache[state.month];
+  if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
+  if (state.error && !cached) { content.appendChild(el("div", { class: "error-block" }, [state.error])); return; }
+  if (!cached) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+
+  content.appendChild(el("h2", { class: "page-title" }, ["Summary — " + MONTHS.find((m) => m.key === state.month).label]));
+
+  if (state.summaryError) content.appendChild(el("div", { class: "error-block" }, [state.summaryError]));
+  if (state.summaryLoading) content.appendChild(el("div", { class: "loading-block" }, ["Updating…"]));
+  if (!currentSummary) {
+    if (!state.summaryLoading && !state.summaryError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+    return;
+  }
+
+  const summary = currentSummary;
+  content.appendChild(renderKpiCards(summary.overall));
+  content.appendChild(renderTable("agency", "Agency-wise Performance", metricColumnsWithLabel("Agency", "outlet"), summary.byAgency));
+  content.appendChild(renderTable("promo", "Promo / Regular Performance", metricColumnsWithLabel("Type", "outlet"), summary.byPromo));
+  content.appendChild(renderTable("topcust", "Top 10 Customers (by Target) — distribution = SKUs at this outlet", metricColumnsWithLabel("Outlet", "sku"), summary.topCustomers));
+  content.appendChild(renderTable("topsku", "Top 20 SKUs (by Target) — distribution = outlets carrying this SKU", metricColumnsWithLabel("SKU", "outlet"), summary.topSkus));
+
+  if (summary.bySalesman) {
+    content.appendChild(renderTable("bysales", "Salesmen-wise Performance", SALESMAN_COLUMNS, summary.bySalesman));
+  }
+}
+
+// Kept for compatibility with call sites (e.g. right after a month/login load).
+function renderContent() {
+  currentSummary = null;
+  fetchAndRenderContent();
+}
+
+/* ---------------------------------------------------------------------
+   BOOT
+   --------------------------------------------------------------------- */
+document.addEventListener("DOMContentLoaded", () => {
+  renderLogin();
+});
+
+</script>
+</body>
+</html>
