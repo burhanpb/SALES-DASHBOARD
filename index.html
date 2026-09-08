@@ -947,12 +947,9 @@ const state = {
   summaryError: null,
   filters: { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" },
   sort: {}, // tableId -> { col, dir }
-  autoRefreshTimer: null,
   _contentReqId: 0,
   _contentDebounceTimer: null,
 };
-
-const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 function $(sel, root) { return (root || document).querySelector(sel); }
 function el(tag, attrs, children) {
@@ -1014,7 +1011,6 @@ function renderLogin(errorMsg) {
 }
 
 function logout() {
-  if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
   state.user = null;
   state.cache = {};
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
@@ -1068,12 +1064,6 @@ async function loadMonth(monthKey, silent) {
     state.error = "Could not load data for " + cfg.label + ": " + err.message + " Try Refresh.";
   }
   renderApp();
-  armAutoRefresh();
-}
-
-function armAutoRefresh() {
-  if (state.autoRefreshTimer) clearInterval(state.autoRefreshTimer);
-  state.autoRefreshTimer = setInterval(() => { loadMonth(state.month, true); }, REFRESH_INTERVAL_MS);
 }
 
 /* ---------------------------------------------------------------------
@@ -1114,7 +1104,7 @@ function renderStatusBar() {
   } else if (state.error) {
     parts.push(el("span", { class: "status-error" }, [state.error]));
   } else if (cached) {
-    parts.push(el("span", { class: "status-ok" }, ["Last updated: " + cached.fetchedAt.toLocaleTimeString() + " (auto-refreshes every 5 min)"]));
+    parts.push(el("span", { class: "status-ok" }, ["Last updated: " + cached.fetchedAt.toLocaleTimeString() + " — click Refresh now to update"]));
   }
   parts.push(el("button", { class: "btn btn-small", onclick: () => loadMonth(state.month) }, ["Refresh now"]));
   bar.appendChild(el("div", { class: "statusbar-inner" }, parts));
@@ -1446,7 +1436,6 @@ function renderContent() {
 document.addEventListener("DOMContentLoaded", () => {
   renderLogin();
 });
-
 </script>
 </body>
 </html>
