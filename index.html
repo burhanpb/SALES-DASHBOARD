@@ -93,6 +93,17 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 .loading-block, .error-block { padding: 40px 16px; text-align: center; color: var(--text-muted); }
 .error-block { color: var(--danger); }
 
+/* Time-gone comparison coloring — placed after .kpi-value/.data-table td
+   so these win on specificity ties. */
+.pct-ahead { color: var(--good) !important; }
+.pct-behind { color: var(--danger) !important; }
+
+/* Shown above the (still-visible) previous numbers while a filter/month
+   change is re-querying Google Sheets, so a slow refresh never looks
+   like the filter silently did nothing. */
+.updating-banner { background: #fff6e0; color: #8a6d00; border: 1px solid #f0dfa0; padding: 9px 14px; border-radius: 8px; margin-bottom: 14px; font-weight: 600; text-align: center; }
+.content-stale { opacity: 0.5; filter: grayscale(35%); transition: opacity 0.15s; }
+
 @media (max-width: 640px) {
   .topbar-title { font-size: 14px; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
@@ -166,6 +177,32 @@ const MONTHS = [
   { key: "2026-08", label: "Aug 2026", targetId: "128WFmTCqUlguNy1iGmKWQnngnQ_uRleEWp5FTEPIeoY", salesId: "1QJwOsenFN0LDhCEAhXXCZOSysBBlHPAJFOvLoMf-UJ0" },
   { key: "2026-09", label: "Sep 2026", targetId: "1MNyUQaqjZdahNqwbz7P6nWAtYAJP19yiVzIB1S-ya4s", salesId: "1o5aCJRRbYxL-oc-8ZA2bi9-zwhL-Bem_PgAzz89K2Ok" },
 ];
+
+/* ---------------------------------------------------------------------
+   2b. "TIME GONE %" — how far through the CURRENT real-world month we
+   are, used to color Ach%/Dist% cells red (behind pace) or green (on/
+   ahead of pace). Formula: (today's day-of-month - 1) / days-in-that-
+   month, expressed as a percentage. A month that's already fully in the
+   past (viewing a previous month) is 100% gone; a future month is 0%
+   gone (shouldn't normally come up, but handled just in case). Days in
+   month correctly accounts for 28/29/30/31 and leap years via the
+   "day 0 of next month" trick below.
+   --------------------------------------------------------------------- */
+function daysInMonth(year, month1based) {
+  return new Date(year, month1based, 0).getDate();
+}
+function computeTimeGonePct(monthKey) {
+  const m = /^(\d{4})-(\d{2})$/.exec(monthKey || "");
+  if (!m) return 100;
+  const year = Number(m[1]), month = Number(m[2]); // month is 1-based
+  const today = new Date();
+  const curYear = today.getFullYear(), curMonth = today.getMonth() + 1;
+  if (year < curYear || (year === curYear && month < curMonth)) return 100; // fully past month
+  if (year > curYear || (year === curYear && month > curMonth)) return 0;   // future month
+  const total = daysInMonth(year, month);
+  const pct = ((today.getDate() - 1) / total) * 100;
+  return Math.max(0, Math.min(100, pct));
+}
 
 /* ---------------------------------------------------------------------
    3. GENERIC HELPERS
@@ -1377,6 +1414,7 @@ document.addEventListener("click", (e) => {
    TABLE RENDERING (generic, sortable)
    --------------------------------------------------------------------- */
 function renderTable(tableId, title, columns, rows) {
+  const timeGonePct = computeTimeGonePct(state.month);
   const wrap = el("div", { class: "table-card" });
   wrap.appendChild(el("div", { class: "table-title" }, [title]));
   const sortState = state.sort[tableId] || { col: null, dir: -1 };
@@ -1411,7 +1449,12 @@ function renderTable(tableId, title, columns, rows) {
     const tr = el("tr");
     columns.forEach((c) => {
       const val = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
-      tr.appendChild(el("td", { class: c.numeric ? "num" : "" }, [val == null ? "-" : String(val)]));
+      let cls = c.numeric ? "num" : "";
+      if (c.timeGoneCompare) {
+        const raw = c.raw ? c.raw(r) : r[c.key];
+        if (typeof raw === "number" && !isNaN(raw)) cls += (raw < timeGonePct ? " pct-behind" : " pct-ahead");
+      }
+      tr.appendChild(el("td", { class: cls }, [val == null ? "-" : String(val)]));
     });
     tbody.appendChild(tr);
   });
@@ -1427,10 +1470,10 @@ const METRIC_COLUMNS = [
   { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
   { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
   { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
-  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v), timeGoneCompare: true, raw: (r) => r.achPct },
   { key: "distTarget", label: "Dist Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
   { key: "distAch", label: "Dist Ach", numeric: true, fmt: (v) => fmtNum(v, 0) },
-  { key: "distPct", label: "Dist %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "distPct", label: "Dist %", numeric: true, fmt: (v) => fmtPct(v), timeGoneCompare: true, raw: (r) => r.distPct },
 ];
 
 /* distType: "outlet" or "sku" — which dimension "distribution" counts in
@@ -1454,33 +1497,39 @@ const SALESMAN_COLUMNS = [
   { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
   { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
   { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
-  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v), timeGoneCompare: true, raw: (r) => r.achPct },
   { key: "_distOutletTarget", label: "Outlet Dist Target", numeric: true, fmt: (v, r) => fmtNum(r.distOutlet.distTarget, 0) },
   { key: "_distOutletAch", label: "Outlet Dist Ach", numeric: true, fmt: (v, r) => fmtNum(r.distOutlet.distAch, 0) },
-  { key: "_distOutletPct", label: "Outlet Dist %", numeric: true, fmt: (v, r) => fmtPct(r.distOutlet.distPct) },
+  { key: "_distOutletPct", label: "Outlet Dist %", numeric: true, fmt: (v, r) => fmtPct(r.distOutlet.distPct), timeGoneCompare: true, raw: (r) => r.distOutlet.distPct },
   { key: "_distSkuTarget", label: "SKU Dist Target", numeric: true, fmt: (v, r) => fmtNum(r.distSku.distTarget, 0) },
   { key: "_distSkuAch", label: "SKU Dist Ach", numeric: true, fmt: (v, r) => fmtNum(r.distSku.distAch, 0) },
-  { key: "_distSkuPct", label: "SKU Dist %", numeric: true, fmt: (v, r) => fmtPct(r.distSku.distPct) },
+  { key: "_distSkuPct", label: "SKU Dist %", numeric: true, fmt: (v, r) => fmtPct(r.distSku.distPct), timeGoneCompare: true, raw: (r) => r.distSku.distPct },
 ];
 
 /* ---------------------------------------------------------------------
    KPI CARDS
    --------------------------------------------------------------------- */
 function renderKpiCards(overall) {
+  const timeGonePct = computeTimeGonePct(state.month);
+  // rawPct === null means "don't color this card against time-gone"
+  // (Time Gone itself, and the plain count/amount cards).
   const cards = [
-    ["Target", fmtNum(overall.target, 0)],
-    ["Achievement (Net)", fmtNum(overall.net, 0)],
-    ["BTG", fmtNum(overall.btg, 0)],
-    ["Ach %", fmtPct(overall.achPct)],
-    ["Return", fmtNum(overall.return, 0)],
-    ["Outlet Distribution Target", fmtNum(overall.distTarget, 0)],
-    ["Outlet Distribution Ach", fmtNum(overall.distAch, 0)],
-    ["Outlet Distribution %", fmtPct(overall.distPct)],
+    ["Time Gone %", fmtPct(timeGonePct), null],
+    ["Target", fmtNum(overall.target, 0), null],
+    ["Achievement (Net)", fmtNum(overall.net, 0), null],
+    ["BTG", fmtNum(overall.btg, 0), null],
+    ["Ach %", fmtPct(overall.achPct), overall.achPct],
+    ["Return", fmtNum(overall.return, 0), null],
+    ["Outlet Distribution Target", fmtNum(overall.distTarget, 0), null],
+    ["Outlet Distribution Ach", fmtNum(overall.distAch, 0), null],
+    ["Outlet Distribution %", fmtPct(overall.distPct), overall.distPct],
   ];
   const wrap = el("div", { class: "kpi-grid" });
-  cards.forEach(([label, val]) => {
+  cards.forEach(([label, val, rawPct]) => {
+    let valClass = "kpi-value";
+    if (typeof rawPct === "number" && !isNaN(rawPct)) valClass += (rawPct < timeGonePct ? " pct-behind" : " pct-ahead");
     wrap.appendChild(el("div", { class: "kpi-card" }, [
-      el("div", { class: "kpi-value" }, [val]),
+      el("div", { class: valClass }, [val]),
       el("div", { class: "kpi-label" }, [label]),
     ]));
   });
@@ -1547,22 +1596,32 @@ function renderSummaryTables() {
   content.appendChild(el("h2", { class: "page-title" }, ["Summary — " + MONTHS.find((m) => m.key === state.month).label]));
 
   if (state.summaryError) content.appendChild(el("div", { class: "error-block" }, [state.summaryError]));
-  if (state.summaryLoading) content.appendChild(el("div", { class: "loading-block" }, ["Updating…"]));
+  // A filter/month change re-queries Google Sheets fresh every time (the
+  // TARGET sheet is too big to filter client-side) — on a slow moment
+  // that can take a while. Make it unmistakable something IS happening,
+  // rather than leaving the old numbers sitting there looking inert.
+  if (state.summaryLoading && currentSummary) {
+    content.appendChild(el("div", { class: "updating-banner" }, ["Updating with your new filters — this can take a little while on a slow connection…"]));
+  } else if (state.summaryLoading) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Updating…"]));
+  }
   if (!currentSummary) {
     if (!state.summaryLoading && !state.summaryError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
     return;
   }
 
   const summary = currentSummary;
-  content.appendChild(renderKpiCards(summary.overall));
-  content.appendChild(renderTable("agency", "Agency-wise Performance", metricColumnsWithLabel("Agency", "outlet"), summary.byAgency));
-  content.appendChild(renderTable("promo", "Promo / Regular Performance", metricColumnsWithLabel("Type", "outlet"), summary.byPromo));
-  content.appendChild(renderTable("topcust", "Top 10 Customers (by Target) — distribution = SKUs at this outlet", metricColumnsWithLabel("Outlet", "sku"), summary.topCustomers));
-  content.appendChild(renderTable("topsku", "Top 20 SKUs (by Target) — distribution = outlets carrying this SKU", metricColumnsWithLabel("SKU", "outlet"), summary.topSkus));
+  const tablesWrap = el("div", { class: state.summaryLoading ? "content-stale" : "" });
+  tablesWrap.appendChild(renderKpiCards(summary.overall));
+  tablesWrap.appendChild(renderTable("agency", "Agency-wise Performance", metricColumnsWithLabel("Agency", "outlet"), summary.byAgency));
+  tablesWrap.appendChild(renderTable("promo", "Promo / Regular Performance", metricColumnsWithLabel("Type", "outlet"), summary.byPromo));
+  tablesWrap.appendChild(renderTable("topcust", "Top 10 Customers (by Target) — distribution = SKUs at this outlet", metricColumnsWithLabel("Outlet", "sku"), summary.topCustomers));
+  tablesWrap.appendChild(renderTable("topsku", "Top 20 SKUs (by Target) — distribution = outlets carrying this SKU", metricColumnsWithLabel("SKU", "outlet"), summary.topSkus));
 
   if (summary.bySalesman) {
-    content.appendChild(renderTable("bysales", "Salesmen-wise Performance", SALESMAN_COLUMNS, summary.bySalesman));
+    tablesWrap.appendChild(renderTable("bysales", "Salesmen-wise Performance", SALESMAN_COLUMNS, summary.bySalesman));
   }
+  content.appendChild(tablesWrap);
 }
 
 // Kept for compatibility with call sites (e.g. right after a month/login load).
