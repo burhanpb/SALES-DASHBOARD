@@ -288,12 +288,79 @@ const _gvizPending = {};
   };
 })();
 
+/* ---------------------------------------------------------------------
+   OPTIONAL RELIABILITY PROXY
+
+   Every phone querying Google's public gviz endpoint directly (below) is
+   what causes the intermittent "sheet query timed out" under real load —
+   many anonymous requests hitting the same publicly-shared sheet at once
+   is exactly the kind of traffic that endpoint isn't built to sustain.
+
+   If you deploy the companion Google Apps Script Web App (see the setup
+   guide) and paste its URL here, every query instead goes through that
+   one script — which fetches Google Sheets with your own account's
+   normal access (not the shaky anonymous public link) and caches results
+   for ~2 minutes so many people opening the dashboard around the same
+   time share one fetch instead of each hitting Google separately.
+
+   Leave this blank to keep using the direct method (still works, still
+   has the retry/backoff below, just more exposed to the same crowding). */
+const GVIZ_PROXY_URL = "https://script.google.com/macros/s/AKfycbzXqu0sn95sqFHcM1bO7OEpKnJasvnSC2QQfl0HZQNjcml7uYgD_KTD_GTULZmztic/exec";
+/* --------------------------------------------------------------------- */
+
+/* Ask the Apps Script proxy to run this GQL query and hand back its
+   already-unwrapped JSON. Same transient/non-transient error contract as
+   the direct script-tag method below, so the retry wrapper further down
+   treats both identically. */
+async function runGvizQueryViaProxy(proxyUrl, sheetId, gql, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = proxyUrl + (proxyUrl.indexOf("?") >= 0 ? "&" : "?") +
+    "sheetId=" + encodeURIComponent(sheetId) + "&gql=" + encodeURIComponent(gql);
+
+  let resp;
+  try {
+    resp = await fetch(url, { signal: controller.signal });
+  } catch (fetchErr) {
+    clearTimeout(timer);
+    const err = new Error(
+      fetchErr && fetchErr.name === "AbortError"
+        ? "Sheet query timed out. Make sure the sheet is shared as 'Anyone with the link can view' (or edit)."
+        : "Could not reach the report server. Check your internet connection."
+    );
+    err.gvizTransient = true;
+    throw err;
+  }
+  clearTimeout(timer);
+
+  let response;
+  try {
+    response = await resp.json();
+  } catch (parseErr) {
+    const err = new Error("Report server returned an unexpected response. Try Refresh.");
+    err.gvizTransient = true; // worth one retry — could be a mid-deploy blip
+    throw err;
+  }
+
+  if (!response || response.status === "error") {
+    const errInfo = (response && response.errors && response.errors[0]) || {};
+    // A real query/sharing error, not a network blip — retrying won't help.
+    throw new Error(
+      "Sheet query failed (" + (errInfo.reason || "error") + "): " + (errInfo.message || errInfo.detailed_message || "") +
+      ". Make sure the sheet is shared as 'Anyone with the link can view' (or edit)."
+    );
+  }
+  return wrapGvizTable(response.table);
+}
+
 /* Run a Google Visualization Query Language string against a sheet via
    script-injection (JSONP) — see the note above on why this is used
    instead of fetch()/XHR or Google's own Query client library.
-   Resolves with a DataTable-like object (caller decides how to read it). */
+   Resolves with a DataTable-like object (caller decides how to read it).
+   This is the direct-to-Google fallback; runGvizQueryOnce below picks
+   this or the proxy method depending on GVIZ_PROXY_URL. */
 let _gvizReqCounter = 0;
-function runGvizQuery(sheetId, gql) {
+function runGvizQueryViaScriptTag(sheetId, gql, timeoutMs, baseOverride) {
   return new Promise((resolve, reject) => {
     const reqId = String(_gvizReqCounter++);
     const script = document.createElement("script");
@@ -301,21 +368,80 @@ function runGvizQuery(sheetId, gql) {
       if (!_gvizPending[reqId]) return;
       delete _gvizPending[reqId];
       if (script.parentNode) script.parentNode.removeChild(script);
-      reject(new Error("Sheet query timed out. Make sure the sheet is shared as 'Anyone with the link can view' (or edit)."));
-    }, 25000);
+      const err = new Error("Sheet query timed out. Make sure the sheet is shared as 'Anyone with the link can view' (or edit).");
+      err.gvizTransient = true;
+      reject(err);
+    }, timeoutMs);
     _gvizPending[reqId] = { resolve, reject, script, timer };
     script.onerror = function () {
       if (!_gvizPending[reqId]) return;
       delete _gvizPending[reqId];
       clearTimeout(timer);
-      reject(new Error("Could not reach the Google Sheet (script failed to load). Check your internet connection."));
+      const err = new Error("Could not reach the Google Sheet (script failed to load). Check your internet connection.");
+      err.gvizTransient = true;
+      reject(err);
     };
-    const base = (typeof window !== "undefined" && window.__GVIZ_BASE_OVERRIDE__) ||
-      "https://docs.google.com/spreadsheets/d/";
+    const base = baseOverride || "https://docs.google.com/spreadsheets/d/";
     const url = base + sheetId +
       "/gviz/tq?tqx=reqId:" + reqId + "&tq=" + encodeURIComponent(gql);
     script.src = url;
     document.head.appendChild(script);
+  });
+}
+
+/* Picks the transport: the proxy (if configured) unless a test override
+   is forcing the direct method against a local fake server. */
+function runGvizQueryOnce(sheetId, gql, timeoutMs) {
+  const testBase = (typeof window !== "undefined" && window.__GVIZ_BASE_OVERRIDE__) || null;
+  const proxyUrl = (typeof window !== "undefined" && window.__GVIZ_PROXY_OVERRIDE__) || GVIZ_PROXY_URL;
+  if (proxyUrl && !testBase) {
+    return runGvizQueryViaProxy(proxyUrl, sheetId, gql, timeoutMs);
+  }
+  return runGvizQueryViaScriptTag(sheetId, gql, timeoutMs, testBase);
+}
+
+function _sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+/* Run an array of zero-arg task functions (each returning a promise) with
+   at most `limit` in flight at once, preserving result order. Browsers cap
+   concurrent connections per host (~6), and on login we fire many gviz
+   queries at once — piling them all into one Promise.all() queues most of
+   them behind the connection cap anyway while making every one of them
+   race the same 20s-per-attempt clock, which is a big part of why loads
+   were timing out under real mobile network conditions. Batching keeps
+   each in-flight request's timeout meaningful. */
+function runLimited(tasks, limit) {
+  const results = new Array(tasks.length);
+  let next = 0;
+  function worker() {
+    const i = next++;
+    if (i >= tasks.length) return Promise.resolve();
+    return tasks[i]().then((r) => { results[i] = r; return worker(); });
+  }
+  const workers = [];
+  for (let w = 0; w < Math.min(limit, tasks.length); w++) workers.push(worker());
+  return Promise.all(workers).then(() => results);
+}
+
+/* Public entry point every caller uses. Google's public gviz endpoint is
+   flaky under real-world mobile networks and concurrent access from many
+   phones hitting the same sheet at once — a single slow/blipped request
+   is common and NOT a real failure. So: retry transient failures (timeout
+   or script-load failure) a couple of times with backoff before surfacing
+   an error to the user. A genuine query error (bad GQL, sheet not shared)
+   comes back from gviz as response.status === "error" — wrapped as a
+   *non*-transient rejection in setResponse above — and is never retried,
+   since retrying won't fix it. */
+function runGvizQuery(sheetId, gql, attempt) {
+  attempt = attempt || 1;
+  const maxAttempts = 3;
+  // Overridable only for automated tests exercising the retry path itself.
+  const timeoutMs = (typeof window !== "undefined" && window.__GVIZ_TIMEOUT_OVERRIDE_MS__) || 20000;
+  return runGvizQueryOnce(sheetId, gql, timeoutMs).catch((err) => {
+    if (err && err.gvizTransient && attempt < maxAttempts) {
+      return _sleep(attempt * 700).then(() => runGvizQuery(sheetId, gql, attempt + 1));
+    }
+    throw err;
   });
 }
 
@@ -1040,16 +1166,19 @@ async function loadMonth(monthKey, silent) {
     const roleWhereSales = buildGqlWhere(salesColMap, state.user, {}, { forSales: true });
     const isManagerTier = state.user.title !== "SALES MEN";
 
-    const [salesRows, agencyOpts, custGroupOpts, promoOpts, prodGroupOpts, groupOpts, collectorOpts, managerOpts] = await Promise.all([
-      fetchSheetRows(cfg.salesId, roleWhereSales),
-      targetDistinctValues(cfg.targetId, targetColMap, "Agency", roleWhereTarget),
-      targetDistinctValues(cfg.targetId, targetColMap, "Cust Group", roleWhereTarget),
-      targetDistinctValues(cfg.targetId, targetColMap, "Promo_Regular ?", roleWhereTarget),
-      targetDistinctValues(cfg.targetId, targetColMap, "Product Group", roleWhereTarget),
-      targetDistinctValues(cfg.targetId, targetColMap, "GROUP", roleWhereTarget),
-      isManagerTier ? targetDistinctValues(cfg.targetId, targetColMap, "Collector", roleWhereTarget) : Promise.resolve([]),
-      isManagerTier ? targetDistinctValues(cfg.targetId, targetColMap, "MANAGERS", roleWhereTarget) : Promise.resolve([]),
-    ]);
+    // Run as a limited-concurrency batch (max 3 in flight), not all at once —
+    // see runLimited's note in dashboard.js. Keeps this from opening ~8
+    // simultaneous connections to Google on every login/refresh.
+    const [salesRows, agencyOpts, custGroupOpts, promoOpts, prodGroupOpts, groupOpts, collectorOpts, managerOpts] = await runLimited([
+      () => fetchSheetRows(cfg.salesId, roleWhereSales),
+      () => targetDistinctValues(cfg.targetId, targetColMap, "Agency", roleWhereTarget),
+      () => targetDistinctValues(cfg.targetId, targetColMap, "Cust Group", roleWhereTarget),
+      () => targetDistinctValues(cfg.targetId, targetColMap, "Promo_Regular ?", roleWhereTarget),
+      () => targetDistinctValues(cfg.targetId, targetColMap, "Product Group", roleWhereTarget),
+      () => targetDistinctValues(cfg.targetId, targetColMap, "GROUP", roleWhereTarget),
+      () => (isManagerTier ? targetDistinctValues(cfg.targetId, targetColMap, "Collector", roleWhereTarget) : Promise.resolve([])),
+      () => (isManagerTier ? targetDistinctValues(cfg.targetId, targetColMap, "MANAGERS", roleWhereTarget) : Promise.resolve([])),
+    ], 3);
 
     state.cache[monthKey] = {
       salesRows, targetColMap, salesColMap,
