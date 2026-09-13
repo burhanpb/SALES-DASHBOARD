@@ -305,7 +305,12 @@ const _gvizPending = {};
 
    Leave this blank to keep using the direct method (still works, still
    has the retry/backoff below, just more exposed to the same crowding). */
-const GVIZ_PROXY_URL = "https://script.google.com/macros/s/AKfycbzXqu0sn95sqFHcM1bO7OEpKnJasvnSC2QQfl0HZQNjcml7uYgD_KTD_GTULZmztic/exec";
+const GVIZ_PROXY_URL = ""; // tried an Apps Script proxy here — reverted, see conversation:
+                            // its own cold-start latency was wildly unpredictable
+                            // (2s to 47s for the identical cached query), which is worse
+                            // than querying Google directly (consistently sub-second in
+                            // testing). Left the plumbing in place in case a future,
+                            // properly warmed/authenticated backend is worth revisiting.
 /* --------------------------------------------------------------------- */
 
 /* Ask the Apps Script proxy to run this GQL query and hand back its
