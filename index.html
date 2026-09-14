@@ -110,10 +110,93 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
   .filter-group { min-width: 46%; }
 }
 
+.gate-note { font-size: 11px; color: var(--text-muted); margin-top: 14px; text-align: center; }
 </style>
 </head>
 <body>
-<div id="root"></div>
+<!-- ===================================================================
+     ACCESS GATE — a single shared password every company user knows,
+     shown before anything else on the page. This is NOT the per-person
+     login below (that still asks for each salesman's own name + PIN and
+     still only shows that person their own data) — this is just the
+     outer front door that keeps random internet visitors from ever
+     reaching this page at all. The password is checked by comparing a
+     SHA-256 hash, so it isn't sitting in the page as plain readable
+     text — but this still runs entirely in the visitor's own browser,
+     so it stops casual/accidental visitors, not a determined technical
+     person willing to dig through the page's code. Once entered
+     correctly on a device, it's remembered there so it's not asked
+     again on that device. =================================================================== -->
+<div id="gate" class="login-wrap">
+  <div class="login-card">
+    <div class="login-title">ZBM Sales Dashboard</div>
+    <div class="login-sub">Enter the company access password to continue</div>
+    <div id="gateError" class="login-error" style="display:none"></div>
+    <label class="field-label">Access password</label>
+    <input id="gatePass" class="input" type="password" placeholder="Access password" autocomplete="off">
+    <button id="gateBtn" class="btn btn-primary btn-block">Continue</button>
+    <div class="gate-note">This is separate from your personal login on the next screen.</div>
+  </div>
+</div>
+<div id="root" style="display:none"></div>
+<script>
+/* Access gate logic — deliberately self-contained (no dependency on the
+   app's own helpers below) so it runs immediately as soon as this tag
+   is reached, before the rest of the page's script even loads. */
+(function () {
+  // SHA-256 of the shared company password. Never store the password
+  // itself here in plain text — only this fingerprint of it.
+  var GATE_HASH = "f19f2461d10dbc436089c90720a0287407128012e99f48e770db49830d6fc265";
+  var STORAGE_KEY = "zbm_gate_ok_v1";
+
+  function sha256Hex(str) {
+    var enc = new TextEncoder().encode(str);
+    return crypto.subtle.digest("SHA-256", enc).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (b) {
+        return b.toString(16).padStart(2, "0");
+      }).join("");
+    });
+  }
+
+  function unlock(remember) {
+    if (remember) { try { localStorage.setItem(STORAGE_KEY, "1"); } catch (e) {} }
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("root").style.display = "";
+    window.__gateUnlocked = true;
+    document.dispatchEvent(new Event("gateUnlocked"));
+  }
+
+  function attempt() {
+    var val = document.getElementById("gatePass").value;
+    var btn = document.getElementById("gateBtn");
+    btn.disabled = true;
+    sha256Hex(val).then(function (hex) {
+      btn.disabled = false;
+      if (hex === GATE_HASH) {
+        unlock(true);
+      } else {
+        var e = document.getElementById("gateError");
+        e.textContent = "Incorrect password. Please try again.";
+        e.style.display = "";
+        document.getElementById("gatePass").value = "";
+        document.getElementById("gatePass").focus();
+      }
+    });
+  }
+
+  var already = false;
+  try { already = localStorage.getItem(STORAGE_KEY) === "1"; } catch (e) {}
+  if (already) {
+    unlock(false);
+  } else {
+    document.getElementById("gateBtn").addEventListener("click", attempt);
+    document.getElementById("gatePass").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") attempt();
+    });
+    document.getElementById("gatePass").focus();
+  }
+})();
+</script>
 <script>
 /* ======================================================================
    ZBM SALES DASHBOARD - Phase 1
@@ -1634,7 +1717,14 @@ function renderContent() {
    BOOT
    --------------------------------------------------------------------- */
 document.addEventListener("DOMContentLoaded", () => {
-  renderLogin();
+  // Wait for the access-password gate (above) before showing the real
+  // per-person login. If the gate already unlocked this device on a
+  // previous visit, window.__gateUnlocked is already true by now.
+  if (window.__gateUnlocked) {
+    renderLogin();
+  } else {
+    document.addEventListener("gateUnlocked", () => renderLogin(), { once: true });
+  }
 });
 </script>
 </body>
