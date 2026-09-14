@@ -111,6 +111,30 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 }
 
 .gate-note { font-size: 11px; color: var(--text-muted); margin-top: 14px; text-align: center; }
+
+/* Page nav tabs (Summary / All Customers-Outlets / Yesterday's Sales) */
+.pagenav { display: flex; gap: 8px; padding: 8px 16px; background: #fff; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tab-btn { border: 1px solid var(--border); background: #eef1f4; color: var(--text); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.tab-btn:hover { filter: brightness(0.97); }
+.tab-btn-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.filterbar-note { padding: 10px 16px; font-size: 12px; color: var(--text-muted); font-style: italic; }
+
+/* Expandable table rows ("+"/"−" drill-down) */
+th.expand-col, td.expand-col { width: 34px; padding-left: 10px; padding-right: 4px; }
+.expand-btn { width: 26px; height: 26px; border: 1px solid var(--border); background: #eef1f4; color: var(--text); border-radius: 6px; font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer; }
+.expand-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+tr.detail-row td.detail-cell { background: #f7f9fb; padding: 10px 10px 14px 34px; border-bottom: 1px solid var(--border); }
+tr.detail-row .table-card { box-shadow: none; border: 1px solid var(--border); margin: 0; }
+.loading-block-inline { padding: 8px 4px; font-size: 12px; color: var(--text-muted); }
+
+/* Outlet Details page — outlet picker */
+.outlet-selector { padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.outlet-selector .field-label { margin: 0; }
+.outlet-selector select.input { width: 100%; }
+
+/* "Not supplied this month" row highlight (Outlet Details -> SKU breakdown) */
+tr.row-not-supplied td { background: #fdecea; color: #9b1c1c; }
+tr.row-not-supplied td:first-child { border-left: 4px solid #d33; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -1190,6 +1214,172 @@ async function buildSummaryData(targetSheetId, targetColMap, whereT, salesRowsSc
   return out;
 }
 
+/* ---------------------------------------------------------------------
+   10. "ALL CUSTOMERS / OUTLETS" PAGE DATA BUILDER
+   Same shape/columns as the Summary page's "Top Customers" table, just
+   with no limit — every outlet in the current role+filter scope, not
+   just the top 10. Deliberately a separate, on-demand function (not
+   folded into buildSummaryData) so visiting this page never adds extra
+   Google Sheets queries to the normal Summary page load.
+   --------------------------------------------------------------------- */
+async function buildOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+  const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", whereT, {});
+  const allCodes = [...custSumMap.keys()];
+  const custDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Cust Site Code", "Item Code", whereT, allCodes);
+  const sByCust = groupBy(salesRowsScoped, "custCode");
+  const rows = allCodes.map((code) => {
+    const row = mergeRow(custSumMap.get(code).label, { target: custSumMap.get(code).target, distTarget: custDistMap.get(code) || 0 }, sByCust.get(code) || [], KEY_SKU);
+    row._custCode = code; // kept so the UI can fetch this one outlet's agency breakdown on demand (the "+" expand button)
+    return row;
+  });
+  return { rows };
+}
+
+/* On-demand agency breakdown for a single outlet — one small GQL query,
+   fired only when a user actually expands that outlet's "+" button (never
+   prefetched for every outlet, to avoid piling extra queries onto a page
+   that can already have hundreds of rows). No distribution columns here
+   (they don't mean much scoped to one outlet) — just Target/Achievement/
+   Return/BTG/Ach%, same as every other agency-wise breakdown in the app. */
+async function buildOutletAgencyBreakdown(targetSheetId, targetColMap, whereBase, custCode, salesRowsScoped) {
+  const custId = colId(targetColMap, ["Cust Site Code"]);
+  const scopedWhere = andJoin(whereBase, eqAnyNumericSafe(custId, [custCode]));
+  const agencySumMap = await targetGroupSum(targetSheetId, targetColMap, "Agency", scopedWhere);
+  const outletSalesRows = salesRowsScoped.filter((r) => r.custCode === custCode);
+  const sByAgency = groupBy(outletSalesRows, "agency");
+  const agencyKeys = new Set([...agencySumMap.keys(), ...sByAgency.keys()]);
+  return [...agencyKeys].filter(Boolean).map((a) =>
+    mergeRow(a, { target: (agencySumMap.get(a) || {}).target || 0, distTarget: 0 }, sByAgency.get(a) || [], KEY_SKU)
+  ).sort((x, y) => y.target - x.target);
+}
+
+/* On-demand SKU breakdown for one AGENCY at one OUTLET — used by the
+   Outlet Details page's "+" expand (agency -> SKU-wise). Scoped by both
+   Cust Site Code AND Agency together. lastSupply on each returned row
+   (from mergeRow) is exactly "last date this SKU was supplied to this
+   outlet under this agency, this month" — null if never this month,
+   which the UI uses to highlight the row red. */
+async function buildOutletAgencySkuBreakdown(targetSheetId, targetColMap, whereBase, custCode, agencyName, salesRowsScoped) {
+  const custId = colId(targetColMap, ["Cust Site Code"]);
+  const agencyId = colId(targetColMap, ["Agency"]);
+  const scopedWhere = andJoin(whereBase, eqAnyNumericSafe(custId, [custCode]), eqAny(agencyId, [agencyName]));
+  const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", scopedWhere, {});
+  const outletAgencySalesRows = salesRowsScoped.filter((r) => r.custCode === custCode && r.agency === agencyName);
+  const sBySku = groupBy(outletAgencySalesRows, "itemCode");
+  const skuKeys = new Set([...skuSumMap.keys(), ...sBySku.keys()]);
+  return [...skuKeys].filter(Boolean).map((code) => {
+    const info = skuSumMap.get(code);
+    const slice = sBySku.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].itemDesc) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_OUTLET);
+  }).sort((x, y) => y.target - x.target);
+}
+
+/* ---------------------------------------------------------------------
+   11. "YESTERDAY'S SALES" PAGE — a fixed, always-previous-calendar-day
+   breakdown (agency-wise / SKU-wise / outlet-wise, with returns), built
+   entirely from already-known SALES rows (no TARGET/GQL queries at all,
+   since a single day has no monthly target to compare against — this is
+   a plain activity report, not an achievement-vs-target one). Ignores
+   the app's Agency/Product Group/etc. filters by design: it's meant to
+   always show a salesman's whole previous day, not a filtered slice.
+   --------------------------------------------------------------------- */
+function computeYesterdayKey(refDate) {
+  const now = refDate || new Date();
+  const y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const yr = y.getFullYear(), month1based = y.getMonth() + 1, day = y.getDate();
+  const monthKey = yr + "-" + String(month1based).padStart(2, "0");
+  const dateKey = yr * 10000 + month1based * 100 + day;
+  return { yr, month1based, day, monthKey, dateKey, label: dateKeyToLabel(dateKey) };
+}
+
+/* Generic "group these already-fetched rows by one field" used both for
+   Yesterday's three top-level tables AND for the on-demand SKU breakdown
+   when a user expands one outlet row — that expansion is just this same
+   function re-run against a pre-filtered slice of the same day's rows, so
+   it's instant (no network call) unlike the Outlets page's expand, which
+   needs a GQL query since Target figures only live in the big TARGET sheet.
+   `_key` keeps the raw grouping value (custCode / itemCode / agency name)
+   so the UI can scope a drill-down without re-deriving it from the label. */
+function groupSalesRowsBy(rows, field, labelField) {
+  const groups = groupBy(rows, field);
+  const out = [];
+  groups.forEach((rs, key) => {
+    if (!key) return;
+    out.push({
+      label: (rs[0] && rs[0][labelField]) || key,
+      _key: key,
+      net: netAchSum(rs),
+      return: returnDisplaySum(rs),
+      outlets: new Set(rs.map((r) => r.custCode)).size,
+      skus: new Set(rs.map((r) => r.itemCode)).size,
+    });
+  });
+  return out.sort((a, b) => b.net - a.net);
+}
+
+function buildYesterdaySummary(dayRows) {
+  const totals = {
+    net: netAchSum(dayRows),
+    return: returnDisplaySum(dayRows),
+    outletsBilled: new Set(dayRows.filter((r) => r.sales > 0).map((r) => r.custCode)).size,
+    skusSold: new Set(dayRows.filter((r) => r.sales > 0).map((r) => r.itemCode)).size,
+  };
+
+  return {
+    totals,
+    dayRows, // kept so the UI can compute a per-outlet SKU breakdown on demand, with no re-fetch
+    byOutlet: groupSalesRowsBy(dayRows, "custCode", "custSite"),
+    byAgency: groupSalesRowsBy(dayRows, "agency", "agency"),
+    bySku: groupSalesRowsBy(dayRows, "itemCode", "itemDesc"),
+  };
+}
+
+/* ---------------------------------------------------------------------
+   12. "0 BILLING" PAGE DATA BUILDERS
+
+   Two lists, both scoped by the current role + filters:
+   (a) outlets that carry a target but zero (or negative, thanks to a
+       return) net sales this month — buildOutletsData already gives the
+       full unlimited outlet list with `target`/`net` on every row, so
+       this is a pure client-side filter of that, no new query needed;
+   (b) SKUs that carry a target but were sold at NONE of this user's
+       outlets this month — needs a SKU-level equivalent of
+       buildOutletsData (unlimited, mirroring the Summary page's "Top
+       20 SKUs" query but with no limit), added here as buildSkusData.
+   Both tables only ever show Target (per explicit spec — no
+   Achievement/Return/etc. columns), so no other field is computed here.
+   --------------------------------------------------------------------- */
+async function buildSkusData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+  const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", whereT, {});
+  const allCodes = [...skuSumMap.keys()];
+  const skuDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Item Code", "Cust Site Code", whereT, allCodes);
+  const sBySku = groupBy(salesRowsScoped, "itemCode");
+  const rows = allCodes.map((code) => {
+    const row = mergeRow(skuSumMap.get(code).label, { target: skuSumMap.get(code).target, distTarget: skuDistMap.get(code) || 0 }, sBySku.get(code) || [], KEY_OUTLET);
+    row._itemCode = code;
+    return row;
+  });
+  return { rows };
+}
+
+/* Pure client-side filter of two already-fetched (full, unlimited)
+   outlet/SKU lists down to the "0 billing" condition: target > 0 and
+   net <= 0. Using <= 0 (not === 0) deliberately covers the outlet case
+   explicitly called out — a return against an earlier month's purchase
+   can push net negative with zero real sales this month, and that
+   outlet should still show up here, not be hidden by a stricter ===0 check. */
+function buildZeroBillingData(outletsRows, skuRows) {
+  const zeroOutlets = outletsRows.filter((r) => r.target > 0 && r.net <= 0);
+  const zeroSkus = skuRows.filter((r) => r.target > 0 && r.net <= 0);
+  return {
+    outlets: zeroOutlets,
+    outletsTotalTarget: sum(zeroOutlets, "target"),
+    skus: zeroSkus,
+    skusTotalTarget: sum(zeroSkus, "target"),
+  };
+}
+
 /* ======================================================================
    UI LAYER — login, shell, filters, search, summary page rendering
    ====================================================================== */
@@ -1197,6 +1387,7 @@ async function buildSummaryData(targetSheetId, targetColMap, whereT, salesRowsSc
 const state = {
   user: null,
   month: MONTHS[MONTHS.length - 1].key, // default = latest month
+  page: "summary", // "summary" | "outlets" | "outletdetail" | "zerobilling" | "yesterday"
   // month -> { salesRows, targetColMap, salesColMap, targetSheetId, salesSheetId, filterOptions, fetchedAt }
   cache: {},
   loading: false,
@@ -1207,6 +1398,8 @@ const state = {
   sort: {}, // tableId -> { col, dir }
   _contentReqId: 0,
   _contentDebounceTimer: null,
+  pageYesterday: null, // { loading, error, data, dateLabel } — set by fetchAndRenderYesterday
+  pageOutletDetail: { custCode: null, label: null }, // the salesman's currently-selected outlet on the Outlet Details page
 };
 
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -1271,6 +1464,16 @@ function renderLogin(errorMsg) {
 function logout() {
   state.user = null;
   state.cache = {};
+  state.page = "summary";
+  state.pageYesterday = null;
+  state.pageOutletDetail = { custCode: null, label: null };
+  currentSummary = null;
+  currentOutlets = null;
+  currentZeroBilling = null;
+  outletDetailAgencies = null;
+  resetExpandable("alloutlets");
+  resetExpandable("y_outlet");
+  resetExpandable("od_agency");
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
   renderLogin();
 }
@@ -1341,6 +1544,7 @@ function renderAppShell() {
         el("button", { class: "btn btn-ghost", onclick: logout }, ["Log out"]),
       ]),
     ]),
+    el("nav", { id: "pagenav", class: "pagenav" }),
     el("div", { id: "statusbar", class: "statusbar" }),
     el("div", { id: "filterbar", class: "filterbar" }),
     el("main", { id: "content", class: "content" }),
@@ -1351,8 +1555,65 @@ function renderApp() {
   if (!state.user) return renderLogin();
   if (!$("#shell")) renderAppShell();
   renderStatusBar();
+  renderPageNav();
   renderFilterBar();
   renderContent();
+}
+
+/* ---------------------------------------------------------------------
+   PAGE NAVIGATION (Summary / All Customers-Outlets / Yesterday's Sales)
+   --------------------------------------------------------------------- */
+const PAGES = [
+  { key: "summary", label: "Summary" },
+  { key: "outlets", label: "All Customers / Outlets" },
+  { key: "outletdetail", label: "Outlet Details" },
+  { key: "zerobilling", label: "0 Billing" },
+  { key: "yesterday", label: "Yesterday's Sales" },
+];
+
+function renderPageNav() {
+  const bar = $("#pagenav");
+  if (!bar) return;
+  bar.innerHTML = "";
+  PAGES.forEach((p) => {
+    const btn = el("button", {
+      class: "tab-btn" + (state.page === p.key ? " tab-btn-active" : ""),
+      type: "button",
+      onclick: () => setPage(p.key),
+    }, [p.label]);
+    bar.appendChild(btn);
+  });
+}
+
+/* A lighter-weight switch than renderApp()/renderContent(): reuses
+   whichever page's data is already cached (snappy switch back to a tab
+   you already visited) and only fetches fresh data the first time a
+   page is opened in this session. scheduleContentRefresh() below is
+   what invalidates that cache when a filter or month actually changes. */
+function setPage(key) {
+  if (state.page === key) return;
+  state.page = key;
+  renderPageNav();
+  renderFilterBar();
+  if (key === "summary") { if (currentSummary) renderSummaryTables(); else fetchAndRenderContent(); }
+  else if (key === "outlets") { if (currentOutlets) renderOutletsPage(); else fetchAndRenderOutlets(); }
+  else if (key === "yesterday") { if (state.pageYesterday && state.pageYesterday.data) renderYesterdayPage(); else fetchAndRenderYesterday(); }
+  else if (key === "outletdetail") {
+    renderOutletDetailPage(); // handles fetching its own outlet list internally
+    if (state.pageOutletDetail.custCode && !outletDetailAgencies && !outletDetailLoading) fetchOutletDetailAgencies();
+  }
+  else if (key === "zerobilling") { if (currentZeroBilling) renderZeroBillingPage(); else fetchAndRenderZeroBilling(); }
+}
+
+/* Re-render whichever page is currently active without re-fetching —
+   used by table column-sort clicks (renderTable below), which only
+   need to re-sort already-fetched data. */
+function rerenderCurrentPage() {
+  if (state.page === "outlets") renderOutletsPage();
+  else if (state.page === "yesterday") renderYesterdayPage();
+  else if (state.page === "outletdetail") renderOutletDetailPage();
+  else if (state.page === "zerobilling") renderZeroBillingPage();
+  else renderSummaryTables();
 }
 
 function renderStatusBar() {
@@ -1428,6 +1689,13 @@ function renderFilterBar() {
   const bar = $("#filterbar");
   bar.innerHTML = "";
 
+  if (state.page === "yesterday") {
+    bar.appendChild(el("div", { class: "filterbar-note" }, [
+      "Yesterday's Sales always shows your full previous day — Agency/Product/other filters above don't apply here.",
+    ]));
+    return;
+  }
+
   const cached = state.cache[state.month];
   const opts = cached ? cached.filterOptions : { agency: [], custGroup: [], promoReg: [], prodGroup: [], group: [], collector: [], managers: [] };
   const isManagerTier = state.user.title !== "SALES MEN";
@@ -1496,7 +1764,8 @@ document.addEventListener("click", (e) => {
 /* ---------------------------------------------------------------------
    TABLE RENDERING (generic, sortable)
    --------------------------------------------------------------------- */
-function renderTable(tableId, title, columns, rows) {
+function renderTable(tableId, title, columns, rows, opts) {
+  opts = opts || {};
   const timeGonePct = computeTimeGonePct(state.month);
   const wrap = el("div", { class: "table-card" });
   wrap.appendChild(el("div", { class: "table-title" }, [title]));
@@ -1518,7 +1787,7 @@ function renderTable(tableId, title, columns, rows) {
     th.addEventListener("click", () => {
       const cur = state.sort[tableId] || { col: null, dir: -1 };
       state.sort[tableId] = { col: c.key, dir: cur.col === c.key ? -cur.dir : -1 };
-      renderSummaryTables(); // re-sort only — no need to re-fetch
+      rerenderCurrentPage(); // re-sort only — no need to re-fetch
     });
     headRow.appendChild(th);
   });
@@ -1529,7 +1798,8 @@ function renderTable(tableId, title, columns, rows) {
     tbody.appendChild(el("tr", {}, [el("td", { colspan: String(columns.length), class: "empty-row" }, ["No data for the current filters."])]));
   }
   sorted.forEach((r) => {
-    const tr = el("tr");
+    const rowCls = opts.rowClass ? (opts.rowClass(r) || "") : "";
+    const tr = el("tr", rowCls ? { class: rowCls } : null);
     columns.forEach((c) => {
       const val = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
       let cls = c.numeric ? "num" : "";
@@ -1540,6 +1810,131 @@ function renderTable(tableId, title, columns, rows) {
       tr.appendChild(el("td", { class: cls }, [val == null ? "-" : String(val)]));
     });
     tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  scrollWrap.appendChild(table);
+  wrap.appendChild(scrollWrap);
+  return wrap;
+}
+
+/* ---------------------------------------------------------------------
+   EXPANDABLE TABLE (a "+"/"−" per row that reveals a nested breakdown)
+   Used by: All Customers/Outlets (outlet -> agency-wise) and Yesterday's
+   Sales' Outlet-wise table (outlet -> SKU-wise). Expand state and fetched
+   detail are cached per tableId+rowKey so re-expanding a row already
+   opened this session doesn't refetch, and collapsing never throws the
+   data away. Cleared only when that page's top-level data is genuinely
+   refetched (new filters/month, or a fresh day) — see fetchAndRenderOutlets
+   / fetchAndRenderYesterday.
+   --------------------------------------------------------------------- */
+const expandState = {};  // tableId -> Set(rowKey)
+const expandCache = {};  // tableId -> Map(rowKey -> { rows } | { error })
+
+function resetExpandable(tableId) {
+  expandState[tableId] = new Set();
+  expandCache[tableId] = new Map();
+}
+
+function toggleExpand(tableId, key, row, opts) {
+  const set = expandState[tableId] = expandState[tableId] || new Set();
+  expandCache[tableId] = expandCache[tableId] || new Map();
+  if (set.has(key)) {
+    set.delete(key);
+    rerenderCurrentPage();
+    return;
+  }
+  set.add(key);
+  rerenderCurrentPage(); // show "Loading…" (or already-cached detail) immediately
+  if (expandCache[tableId].has(key)) return; // already have the detail — nothing to fetch
+  Promise.resolve(opts.loadDetail(row)).then((rows) => {
+    expandCache[tableId].set(key, { rows });
+    rerenderCurrentPage();
+  }).catch((err) => {
+    expandCache[tableId].set(key, { error: "Could not load detail: " + err.message });
+    rerenderCurrentPage();
+  });
+}
+
+/* opts: { keyOf(row)->string, loadDetail(row)->Array|Promise<Array>,
+   detailColumns, detailTitle(row)->string, detailRowClass?(detailRow)->string
+   — optional per-row CSS class for the nested detail table, e.g. to
+   highlight a SKU never supplied this month in red. } */
+function renderExpandableTable(tableId, title, columns, rows, opts) {
+  expandState[tableId] = expandState[tableId] || new Set();
+  expandCache[tableId] = expandCache[tableId] || new Map();
+
+  const timeGonePct = computeTimeGonePct(state.month);
+  const wrap = el("div", { class: "table-card" });
+  wrap.appendChild(el("div", { class: "table-title" }, [title]));
+  const sortState = state.sort[tableId] || { col: null, dir: -1 };
+  let sorted = rows.slice();
+  if (sortState.col) {
+    sorted.sort((a, b) => {
+      const va = a[sortState.col], vb = b[sortState.col];
+      if (typeof va === "string" || typeof vb === "string") return String(va).localeCompare(String(vb)) * sortState.dir;
+      return ((va || 0) - (vb || 0)) * sortState.dir;
+    });
+  }
+  const scrollWrap = el("div", { class: "table-scroll" });
+  const table = el("table", { class: "data-table" });
+  const thead = el("thead");
+  const headRow = el("tr");
+  headRow.appendChild(el("th", { class: "expand-col" }, [""]));
+  columns.forEach((c) => {
+    const th = el("th", { class: c.numeric ? "num" : "" }, [c.label + (sortState.col === c.key ? (sortState.dir === 1 ? " ▲" : " ▼") : "")]);
+    th.addEventListener("click", () => {
+      const cur = state.sort[tableId] || { col: null, dir: -1 };
+      state.sort[tableId] = { col: c.key, dir: cur.col === c.key ? -cur.dir : -1 };
+      rerenderCurrentPage();
+    });
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = el("tbody");
+  if (!sorted.length) {
+    tbody.appendChild(el("tr", {}, [el("td", { colspan: String(columns.length + 1), class: "empty-row" }, ["No data for the current filters."])]));
+  }
+  sorted.forEach((r) => {
+    const key = opts.keyOf(r);
+    const isExpanded = expandState[tableId].has(key);
+    const tr = el("tr");
+    const btn = el("button", { class: "expand-btn", type: "button", title: isExpanded ? "Show overall only" : "Show breakdown" }, [isExpanded ? "−" : "+"]);
+    btn.addEventListener("click", () => toggleExpand(tableId, key, r, opts));
+    tr.appendChild(el("td", { class: "expand-col" }, [btn]));
+    columns.forEach((c) => {
+      const val = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
+      let cls = c.numeric ? "num" : "";
+      if (c.timeGoneCompare) {
+        const raw = c.raw ? c.raw(r) : r[c.key];
+        if (typeof raw === "number" && !isNaN(raw)) cls += (raw < timeGonePct ? " pct-behind" : " pct-ahead");
+      }
+      tr.appendChild(el("td", { class: cls }, [val == null ? "-" : String(val)]));
+    });
+    tbody.appendChild(tr);
+
+    if (isExpanded) {
+      const detailTr = el("tr", { class: "detail-row" });
+      const detailTd = el("td", { colspan: String(columns.length + 1), class: "detail-cell" });
+      const cacheEntry = expandCache[tableId].get(key);
+      if (!cacheEntry) {
+        detailTd.appendChild(el("div", { class: "loading-block loading-block-inline" }, ["Loading…"]));
+      } else if (cacheEntry.error) {
+        detailTd.appendChild(el("div", { class: "error-block" }, [cacheEntry.error]));
+      } else if (!cacheEntry.rows.length) {
+        detailTd.appendChild(el("div", { class: "loading-block loading-block-inline" }, ["No breakdown available."]));
+      } else {
+        detailTd.appendChild(renderTable(
+          tableId + "__d__" + key,
+          opts.detailTitle ? opts.detailTitle(r) : "",
+          opts.detailColumns,
+          cacheEntry.rows,
+          { rowClass: opts.detailRowClass }
+        ));
+      }
+      detailTr.appendChild(detailTd);
+      tbody.appendChild(detailTr);
+    }
   });
   table.appendChild(tbody);
   scrollWrap.appendChild(table);
@@ -1630,13 +2025,32 @@ function renderKpiCards(overall) {
    re-fetches — it just re-renders the already-fetched summary.
    --------------------------------------------------------------------- */
 let currentSummary = null;
+let currentOutlets = null;
+let outletsLoading = false;
+let outletsError = null;
 
+/* Filters/month apply to Summary, All Customers/Outlets, Outlet Details,
+   and 0 Billing, so any change invalidates all four — whichever page is
+   active refreshes right away below; the others just lazily refetch next
+   time you switch to them (see setPage), rather than all refetching on
+   every keystroke. */
 function scheduleContentRefresh() {
+  currentSummary = null;
+  currentOutlets = null;
+  currentZeroBilling = null;
+  outletDetailAgencies = null; // the selected outlet's agency breakdown also depends on the active filters
   if (state._contentDebounceTimer) clearTimeout(state._contentDebounceTimer);
-  state._contentDebounceTimer = setTimeout(() => { fetchAndRenderContent(); }, 350);
+  state._contentDebounceTimer = setTimeout(() => {
+    if (state.page === "outlets") fetchAndRenderOutlets();
+    else if (state.page === "summary") fetchAndRenderContent();
+    else if (state.page === "zerobilling") fetchAndRenderZeroBilling();
+    else if (state.page === "outletdetail" && state.pageOutletDetail.custCode) fetchOutletDetailAgencies();
+  }, 350);
   // Immediately show a lightweight "updating" state so the UI responds instantly.
-  state.summaryLoading = true;
-  renderSummaryTables();
+  if (state.page === "outlets") { outletsLoading = true; renderOutletsPage(); }
+  else if (state.page === "summary") { state.summaryLoading = true; renderSummaryTables(); }
+  else if (state.page === "zerobilling") { zeroBillingLoading = true; renderZeroBillingPage(); }
+  else if (state.page === "outletdetail") { outletDetailLoading = true; renderOutletDetailPage(); }
 }
 
 async function fetchAndRenderContent() {
@@ -1707,24 +2121,488 @@ function renderSummaryTables() {
   content.appendChild(tablesWrap);
 }
 
-// Kept for compatibility with call sites (e.g. right after a month/login load).
+// Kept for compatibility with call sites (e.g. right after a month/login load) —
+// this is the "full reload" entry point, page-aware: dispatches to whichever
+// page is active and always forces a fresh fetch (unlike setPage, which
+// reuses already-cached data for a fast tab switch).
 function renderContent() {
+  if (state.page === "outlets") { currentOutlets = null; fetchAndRenderOutlets(); return; }
+  if (state.page === "yesterday") { fetchAndRenderYesterday(); return; }
+  if (state.page === "zerobilling") { currentZeroBilling = null; fetchAndRenderZeroBilling(); return; }
+  if (state.page === "outletdetail") {
+    currentOutlets = null;
+    outletDetailAgencies = null;
+    renderOutletDetailPage(); // fetches its own outlet-list internally when currentOutlets is null
+    if (state.pageOutletDetail.custCode) fetchOutletDetailAgencies();
+    return;
+  }
   currentSummary = null;
   fetchAndRenderContent();
+}
+
+/* ---------------------------------------------------------------------
+   ALL CUSTOMERS / OUTLETS PAGE — same columns as Summary's "Top
+   Customers" table, but every outlet in scope, not just the top 10.
+   Respects the same Agency/Product Group/etc. filters as Summary.
+   --------------------------------------------------------------------- */
+async function fetchAndRenderOutlets() {
+  const content = $("#content");
+  if (!content) return;
+  const cached = state.cache[state.month];
+  if (!cached) return;
+
+  const reqId = ++state._contentReqId;
+  outletsLoading = true;
+  outletsError = null;
+  resetExpandable("alloutlets"); // a real refetch invalidates any "+"-expanded agency breakdowns
+  renderOutletsPage();
+
+  try {
+    const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+    const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    const outlets = await buildOutletsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped);
+    if (reqId !== state._contentReqId) return; // a newer request superseded this one
+    currentOutlets = outlets;
+    outletsLoading = false;
+    outletsError = null;
+  } catch (err) {
+    if (reqId !== state._contentReqId) return;
+    outletsLoading = false;
+    outletsError = "Could not load outlets: " + err.message;
+  }
+  renderOutletsPage();
+}
+
+function renderOutletsPage() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+
+  const cached = state.cache[state.month];
+  if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
+  if (state.error && !cached) { content.appendChild(el("div", { class: "error-block" }, [state.error])); return; }
+  if (!cached) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+
+  content.appendChild(el("h2", { class: "page-title" }, ["All Customers / Outlets — " + MONTHS.find((m) => m.key === state.month).label]));
+
+  if (outletsError) content.appendChild(el("div", { class: "error-block" }, [outletsError]));
+  if (outletsLoading && currentOutlets) {
+    content.appendChild(el("div", { class: "updating-banner" }, ["Updating with your new filters — this can take a little while on a slow connection…"]));
+  } else if (outletsLoading) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+  }
+  if (!currentOutlets) {
+    if (!outletsLoading && !outletsError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+    return;
+  }
+
+  const wrap = el("div", { class: outletsLoading ? "content-stale" : "" });
+  wrap.appendChild(renderExpandableTable(
+    "alloutlets",
+    "All Customers / Outlets (" + currentOutlets.rows.length + ") — distribution = SKUs at this outlet. Click + on a row for its agency-wise breakdown.",
+    metricColumnsWithLabel("Outlet", "sku"),
+    currentOutlets.rows,
+    {
+      keyOf: (r) => r._custCode,
+      loadDetail: loadOutletAgencyDetail,
+      detailColumns: OUTLET_AGENCY_COLUMNS,
+      detailTitle: (r) => "Agency-wise sales at " + r.label,
+    }
+  ));
+  content.appendChild(wrap);
+}
+
+const OUTLET_AGENCY_COLUMNS = [
+  { key: "label", label: "Agency" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v), timeGoneCompare: true, raw: (r) => r.achPct },
+];
+
+function loadOutletAgencyDetail(row) {
+  const cached = state.cache[state.month];
+  if (!cached) return [];
+  const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+  const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+  return buildOutletAgencyBreakdown(cached.targetSheetId, cached.targetColMap, whereT, row._custCode, salesRowsScoped);
+}
+
+/* ---------------------------------------------------------------------
+   OUTLET DETAILS PAGE — salesman picks one of their own outlets, sees
+   its agency-wise Target/Achievement (same shape as the Outlets page's
+   "+" breakdown, reused directly), then can "+" any agency row to see
+   that agency's SKU-wise Target/Sale at this one outlet, including when
+   it was last supplied this month — highlighted red if never supplied
+   this month at all.
+   --------------------------------------------------------------------- */
+let outletDetailAgencies = null; // { rows } — the selected outlet's agency-wise breakdown
+let outletDetailLoading = false;
+let outletDetailError = null;
+let odListLoading = false; // loading state for the outlet-picker's own list (reuses currentOutlets as the source of truth)
+let odListError = null;
+
+/* Populates currentOutlets (the same full outlet list the Outlets page
+   uses) if it isn't already loaded — reused rather than duplicated so
+   visiting both pages in one session doesn't double-query Google. */
+async function ensureOutletsListForSelector() {
+  if (currentOutlets || odListLoading) return currentOutlets;
+  const cached = state.cache[state.month];
+  if (!cached) return null;
+  odListLoading = true;
+  odListError = null;
+  renderOutletDetailPage();
+  try {
+    const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+    const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    currentOutlets = await buildOutletsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped);
+  } catch (err) {
+    odListError = "Could not load your outlet list: " + err.message;
+  }
+  odListLoading = false;
+  renderOutletDetailPage();
+  return currentOutlets;
+}
+
+function selectOutletDetail(custCode, label) {
+  state.pageOutletDetail = { custCode, label };
+  outletDetailAgencies = null;
+  fetchOutletDetailAgencies();
+}
+
+async function fetchOutletDetailAgencies() {
+  const content = $("#content");
+  if (!content) return;
+  const cached = state.cache[state.month];
+  const custCode = state.pageOutletDetail.custCode;
+  if (!cached || !custCode) return;
+
+  const reqId = ++state._contentReqId;
+  outletDetailLoading = true;
+  outletDetailError = null;
+  resetExpandable("od_agency"); // a real refetch invalidates any "+"-expanded SKU breakdowns
+  renderOutletDetailPage();
+
+  try {
+    const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+    const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    const rows = await buildOutletAgencyBreakdown(cached.targetSheetId, cached.targetColMap, whereT, custCode, salesRowsScoped);
+    if (reqId !== state._contentReqId) return; // a newer request superseded this one
+    outletDetailAgencies = { rows };
+    outletDetailLoading = false;
+    outletDetailError = null;
+  } catch (err) {
+    if (reqId !== state._contentReqId) return;
+    outletDetailLoading = false;
+    outletDetailError = "Could not load agency breakdown: " + err.message;
+  }
+  renderOutletDetailPage();
+}
+
+function renderOutletDetailPage() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+
+  const cached = state.cache[state.month];
+  if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
+  if (state.error && !cached) { content.appendChild(el("div", { class: "error-block" }, [state.error])); return; }
+  if (!cached) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+
+  content.appendChild(el("h2", { class: "page-title" }, ["Outlet Details — " + MONTHS.find((m) => m.key === state.month).label]));
+
+  const selectorWrap = el("div", { class: "outlet-selector" });
+  selectorWrap.appendChild(el("label", { class: "field-label" }, ["Select an outlet"]));
+  if (odListError) {
+    selectorWrap.appendChild(el("div", { class: "error-block" }, [odListError]));
+  } else if (!currentOutlets) {
+    selectorWrap.appendChild(el("div", { class: "loading-block" }, ["Loading your outlets…"]));
+    if (!odListLoading) ensureOutletsListForSelector();
+  } else {
+    const sortedOutlets = currentOutlets.rows.slice().sort((a, b) => a.label.localeCompare(b.label));
+    const options = [el("option", { value: "" }, ["Select an outlet..."])].concat(
+      sortedOutlets.map((r) => el("option", { value: r._custCode }, [r.label]))
+    );
+    const sel = el("select", { class: "input", id: "outletDetailSelect" }, options);
+    sel.value = state.pageOutletDetail.custCode || "";
+    sel.addEventListener("change", () => {
+      if (!sel.value) { state.pageOutletDetail = { custCode: null, label: null }; outletDetailAgencies = null; renderOutletDetailPage(); return; }
+      const picked = currentOutlets.rows.find((r) => r._custCode === sel.value);
+      selectOutletDetail(sel.value, picked ? picked.label : sel.value);
+    });
+    selectorWrap.appendChild(sel);
+  }
+  content.appendChild(selectorWrap);
+
+  if (!state.pageOutletDetail.custCode) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Pick one of your outlets above to see its agency-wise performance."]));
+    return;
+  }
+
+  if (outletDetailError) content.appendChild(el("div", { class: "error-block" }, [outletDetailError]));
+  if (outletDetailLoading && outletDetailAgencies) {
+    content.appendChild(el("div", { class: "updating-banner" }, ["Updating with your new filters — this can take a little while on a slow connection…"]));
+  } else if (outletDetailLoading) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Loading " + state.pageOutletDetail.label + "'s agency-wise performance…"]));
+  }
+  if (!outletDetailAgencies) {
+    if (!outletDetailLoading && !outletDetailError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+    return;
+  }
+
+  const wrap = el("div", { class: outletDetailLoading ? "content-stale" : "" });
+  wrap.appendChild(renderExpandableTable(
+    "od_agency",
+    "Agency-wise Performance at " + state.pageOutletDetail.label + ". Click + on a row for its SKU-wise breakdown.",
+    OUTLET_AGENCY_COLUMNS,
+    outletDetailAgencies.rows,
+    {
+      keyOf: (r) => r.label, // agency name — unique within a single outlet's breakdown
+      loadDetail: (row) => loadOutletDetailSkuDetail(row),
+      detailColumns: OUTLET_DETAIL_SKU_COLUMNS,
+      detailTitle: (r) => "SKU-wise sales — " + r.label + " at " + state.pageOutletDetail.label,
+      detailRowClass: (r) => (r.lastSupply ? "" : "row-not-supplied"),
+    }
+  ));
+  content.appendChild(wrap);
+}
+
+const OUTLET_DETAIL_SKU_COLUMNS = [
+  { key: "label", label: "SKU" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "lastSupply", label: "Last Supplied This Month", fmt: (v) => (v ? dateKeyToLabel(v) : "Not supplied this month") },
+];
+
+function loadOutletDetailSkuDetail(row) {
+  const cached = state.cache[state.month];
+  if (!cached) return [];
+  const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+  const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+  return buildOutletAgencySkuBreakdown(cached.targetSheetId, cached.targetColMap, whereT, state.pageOutletDetail.custCode, row.label, salesRowsScoped);
+}
+
+/* ---------------------------------------------------------------------
+   0 BILLING PAGE — outlets that carry a target but no real sales this
+   month (net <= 0, so a return-driven negative counts too), and SKUs
+   that carry a target but weren't sold at any of this user's outlets
+   this month. Target-only columns per spec, plus one overall Target
+   total per table.
+   --------------------------------------------------------------------- */
+let currentZeroBilling = null;
+let zeroBillingLoading = false;
+let zeroBillingError = null;
+
+async function fetchAndRenderZeroBilling() {
+  const content = $("#content");
+  if (!content) return;
+  const cached = state.cache[state.month];
+  if (!cached) return;
+
+  const reqId = ++state._contentReqId;
+  zeroBillingLoading = true;
+  zeroBillingError = null;
+  renderZeroBillingPage();
+
+  try {
+    const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+    const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    const [outlets, skus] = await Promise.all([
+      buildOutletsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped),
+      buildSkusData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped),
+    ]);
+    if (reqId !== state._contentReqId) return; // a newer request superseded this one
+    currentZeroBilling = buildZeroBillingData(outlets.rows, skus.rows);
+    zeroBillingLoading = false;
+    zeroBillingError = null;
+  } catch (err) {
+    if (reqId !== state._contentReqId) return;
+    zeroBillingLoading = false;
+    zeroBillingError = "Could not load 0 billing data: " + err.message;
+  }
+  renderZeroBillingPage();
+}
+
+const ZERO_OUTLET_COLUMNS = [
+  { key: "label", label: "Outlet" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+];
+const ZERO_SKU_COLUMNS = [
+  { key: "label", label: "SKU" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+];
+
+function renderZeroBillingPage() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+
+  const cached = state.cache[state.month];
+  if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
+  if (state.error && !cached) { content.appendChild(el("div", { class: "error-block" }, [state.error])); return; }
+  if (!cached) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+
+  content.appendChild(el("h2", { class: "page-title" }, ["0 Billing — " + MONTHS.find((m) => m.key === state.month).label]));
+
+  if (zeroBillingError) content.appendChild(el("div", { class: "error-block" }, [zeroBillingError]));
+  if (zeroBillingLoading && currentZeroBilling) {
+    content.appendChild(el("div", { class: "updating-banner" }, ["Updating with your new filters — this can take a little while on a slow connection…"]));
+  } else if (zeroBillingLoading) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+  }
+  if (!currentZeroBilling) {
+    if (!zeroBillingLoading && !zeroBillingError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+    return;
+  }
+
+  const z = currentZeroBilling;
+  const wrap = el("div", { class: zeroBillingLoading ? "content-stale" : "" });
+
+  const kpi = el("div", { class: "kpi-grid" }, [
+    ["0-Billed Outlets", fmtNum(z.outlets.length, 0)],
+    ["Target (0-Billed Outlets)", fmtNum(z.outletsTotalTarget, 0)],
+    ["0-Billed SKUs", fmtNum(z.skus.length, 0)],
+    ["Target (0-Billed SKUs)", fmtNum(z.skusTotalTarget, 0)],
+  ].map(([label2, val]) => el("div", { class: "kpi-card" }, [
+    el("div", { class: "kpi-value" }, [val]),
+    el("div", { class: "kpi-label" }, [label2]),
+  ])));
+  wrap.appendChild(kpi);
+
+  wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no sales this month (a return-driven negative counts as 0-billed too)", ZERO_OUTLET_COLUMNS, z.outlets));
+  wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but not sold at any outlet this month", ZERO_SKU_COLUMNS, z.skus));
+
+  content.appendChild(wrap);
+}
+
+/* ---------------------------------------------------------------------
+   YESTERDAY'S SALES PAGE — fixed to the real previous calendar day,
+   independent of the Month selector and the Agency/etc. filters. Built
+   entirely from already-fetched SALES rows (no extra Google queries
+   beyond, at most, loading one month's SALES rows if "yesterday" falls
+   in a month the user hasn't otherwise opened — e.g. viewing on the 1st
+   of a new month).
+   --------------------------------------------------------------------- */
+async function ensureMonthSalesRows(monthKey) {
+  const existing = state.cache[monthKey];
+  if (existing && existing.salesRows) return existing;
+  const cfg = MONTHS.find((m) => m.key === monthKey);
+  if (!cfg) throw new Error("No sheet is set up for " + monthKey + " yet.");
+  const salesColMap = await resolveColumnMap(cfg.salesId);
+  const roleWhereSales = buildGqlWhere(salesColMap, state.user, {}, { forSales: true });
+  const salesRows = await fetchSheetRows(cfg.salesId, roleWhereSales);
+  state.cache[monthKey] = Object.assign({}, state.cache[monthKey] || {}, {
+    salesRows, salesColMap, salesSheetId: cfg.salesId,
+  });
+  return state.cache[monthKey];
+}
+
+async function fetchAndRenderYesterday() {
+  const content = $("#content");
+  if (!content) return;
+  const y = computeYesterdayKey();
+  state.pageYesterday = { loading: true, error: null, data: state.pageYesterday ? state.pageYesterday.data : null, dateLabel: y.label };
+  resetExpandable("y_outlet"); // a real refetch invalidates any "+"-expanded SKU breakdowns
+  renderYesterdayPage();
+
+  if (!MONTHS.find((m) => m.key === y.monthKey)) {
+    state.pageYesterday = { loading: false, error: "No sheet is set up yet for " + y.label + ".", data: null, dateLabel: y.label };
+    renderYesterdayPage();
+    return;
+  }
+
+  try {
+    const monthData = await ensureMonthSalesRows(y.monthKey);
+    const dayRows = monthData.salesRows.filter((r) => r.lastDate === y.dateKey);
+    state.pageYesterday = { loading: false, error: null, data: buildYesterdaySummary(dayRows), dateLabel: y.label };
+  } catch (err) {
+    state.pageYesterday = { loading: false, error: "Could not load " + y.label + "'s sales: " + err.message, data: state.pageYesterday ? state.pageYesterday.data : null, dateLabel: y.label };
+  }
+  renderYesterdayPage();
+}
+
+const YESTERDAY_COLUMNS_BASE = [
+  { key: "label", label: "" },
+  { key: "net", label: "Sales", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "outlets", label: "Outlets", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "skus", label: "SKUs", numeric: true, fmt: (v) => fmtNum(v, 0) },
+];
+function yesterdayColumnsWithLabel(labelHeader) {
+  const cols = YESTERDAY_COLUMNS_BASE.map((c) => Object.assign({}, c));
+  cols[0] = { key: "label", label: labelHeader };
+  return cols;
+}
+
+function renderYesterdayPage() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+
+  const py = state.pageYesterday || {};
+  const label = py.dateLabel || computeYesterdayKey().label;
+  content.appendChild(el("h2", { class: "page-title" }, ["Yesterday's Sales — " + label]));
+
+  if (py.loading && !py.data) { content.appendChild(el("div", { class: "loading-block" }, ["Loading " + label + "'s sales…"])); return; }
+  if (py.error && !py.data) { content.appendChild(el("div", { class: "error-block" }, [py.error])); return; }
+  if (!py.data) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+  if (py.error) content.appendChild(el("div", { class: "error-block" }, [py.error]));
+  if (py.loading) content.appendChild(el("div", { class: "updating-banner" }, ["Refreshing…"]));
+
+  const d = py.data;
+  const wrap = el("div", { class: py.loading ? "content-stale" : "" });
+
+  const kpi = el("div", { class: "kpi-grid" }, [
+    ["Sales", fmtNum(d.totals.net, 0)],
+    ["Return", fmtNum(d.totals.return, 0)],
+    ["Outlets Billed", fmtNum(d.totals.outletsBilled, 0)],
+    ["SKUs Sold", fmtNum(d.totals.skusSold, 0)],
+  ].map(([label2, val]) => el("div", { class: "kpi-card" }, [
+    el("div", { class: "kpi-value" }, [val]),
+    el("div", { class: "kpi-label" }, [label2]),
+  ])));
+  wrap.appendChild(kpi);
+
+  wrap.appendChild(renderExpandableTable(
+    "y_outlet",
+    "Outlet-wise Sales — " + label + ". Click + on a row for its SKU-wise breakdown.",
+    yesterdayColumnsWithLabel("Outlet"),
+    d.byOutlet,
+    {
+      keyOf: (r) => r._key,
+      loadDetail: (row) => loadYesterdayOutletSkuDetail(row),
+      detailColumns: YESTERDAY_DETAIL_COLUMNS,
+      detailTitle: (r) => "SKU-wise sales at " + r.label,
+    }
+  ));
+  wrap.appendChild(renderTable("y_agency", "Agency-wise Sales — " + label, yesterdayColumnsWithLabel("Agency"), d.byAgency));
+  wrap.appendChild(renderTable("y_sku", "SKU-wise Sales — " + label, yesterdayColumnsWithLabel("SKU"), d.bySku));
+
+  content.appendChild(wrap);
+}
+
+const YESTERDAY_DETAIL_COLUMNS = [
+  { key: "label", label: "SKU" },
+  { key: "net", label: "Sales", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+];
+
+function loadYesterdayOutletSkuDetail(row) {
+  const py = state.pageYesterday;
+  const dayRows = (py && py.data && py.data.dayRows) || [];
+  const scoped = dayRows.filter((r) => r.custCode === row._key);
+  return groupSalesRowsBy(scoped, "itemCode", "itemDesc"); // synchronous — no query needed, data's already local
 }
 
 /* ---------------------------------------------------------------------
    BOOT
    --------------------------------------------------------------------- */
 document.addEventListener("DOMContentLoaded", () => {
-  // Wait for the access-password gate (above) before showing the real
-  // per-person login. If the gate already unlocked this device on a
-  // previous visit, window.__gateUnlocked is already true by now.
-  if (window.__gateUnlocked) {
-    renderLogin();
-  } else {
-    document.addEventListener("gateUnlocked", () => renderLogin(), { once: true });
-  }
+  renderLogin();
 });
 </script>
 </body>
