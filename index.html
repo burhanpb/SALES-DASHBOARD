@@ -24,6 +24,58 @@
   --good: #1e8e3e;
   --header-bg: #16324f;
   --header-text: #ffffff;
+  /* Additional tokens (light/default values) — every color in this
+     stylesheet routes through one of these so the dark override block
+     below can flip the whole app by redefining just these. */
+  --input-bg: #ffffff;
+  --surface: #eef1f4;
+  --surface-2: #f0f3f6;
+  --row-hover: #f7fafd;
+  --statusbar-bg: #eef2f6;
+  --updating-bg: #fff6e0;
+  --updating-text: #8a6d00;
+  --updating-border: #f0dfa0;
+  --highlight-bg: #fdecea;
+  --highlight-text: #9b1c1c;
+  --highlight-border: #d33;
+  --detail-bg: #f7f9fb;
+  --row-border: #eef1f4;
+  --shadow-color: rgba(0,0,0,0.06);
+  --shadow-color-strong: rgba(0,0,0,0.12);
+  --on-accent: #ffffff;
+}
+/* Dark theme — applied when <html data-theme="dark">, set by the theme
+   toggle in the topbar (see toggleTheme() in ui.js) and remembered in
+   localStorage. Default (no attribute, or data-theme="light") is the
+   light palette above. */
+:root[data-theme="dark"] {
+  --bg: #0f1720;
+  --card-bg: #17222f;
+  --border: #2c3c4e;
+  --text: #e7edf3;
+  --text-muted: #93a3b3;
+  --accent: #5b9dff;
+  --accent-dark: #8fbcff;
+  --danger: #ff7a7a;
+  --good: #3ddc84;
+  --header-bg: #0b1723;
+  --header-text: #ffffff;
+  --input-bg: #101b28;
+  --surface: #223142;
+  --surface-2: #1b2836;
+  --row-hover: #1c2b3a;
+  --statusbar-bg: #14202c;
+  --updating-bg: #3a3010;
+  --updating-text: #f2da7a;
+  --updating-border: #5c4c18;
+  --highlight-bg: #3a1a1a;
+  --highlight-text: #ff9d9d;
+  --highlight-border: #ff5c5c;
+  --detail-bg: #121e2a;
+  --row-border: #223142;
+  --shadow-color: rgba(0,0,0,0.35);
+  --shadow-color-strong: rgba(0,0,0,0.5);
+  --on-accent: #ffffff;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; font-size: 14px; }
@@ -31,20 +83,21 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 
 /* Login */
 .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; }
-.login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px; width: 100%; max-width: 360px; box-shadow: 0 4px 18px rgba(0,0,0,0.06); }
+.login-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 28px 24px; width: 100%; max-width: 360px; box-shadow: 0 4px 18px var(--shadow-color); }
 .login-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; color: var(--header-bg); }
 .login-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 18px; }
-.login-error { background: #fdecea; color: var(--danger); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
+.login-error { background: var(--highlight-bg); color: var(--danger); padding: 8px 10px; border-radius: 8px; font-size: 13px; margin-bottom: 12px; }
 .field-label { font-size: 12px; font-weight: 600; color: var(--text-muted); margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .03em; }
 
-.input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; background: #fff; color: var(--text); }
+.input { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; background: var(--input-bg); color: var(--text); }
 .input-small { padding: 6px 8px; font-size: 13px; }
-.btn { border: none; border-radius: 8px; padding: 10px 14px; font-size: 14px; font-weight: 600; cursor: pointer; background: #eef1f4; color: var(--text); }
+.btn { border: none; border-radius: 8px; padding: 10px 14px; font-size: 14px; font-weight: 600; cursor: pointer; background: var(--surface); color: var(--text); }
 .btn:hover { filter: brightness(0.97); }
-.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary { background: var(--accent); color: var(--on-accent); }
 .btn-block { width: 100%; margin-top: 16px; }
 .btn-ghost { background: transparent; color: var(--header-text); border: 1px solid rgba(255,255,255,0.35); }
 .btn-small { padding: 6px 10px; font-size: 12px; }
+.btn-icon { padding: 8px 10px; font-size: 15px; line-height: 1; }
 
 /* Shell */
 .topbar { background: var(--header-bg); color: var(--header-text); display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
@@ -52,23 +105,23 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 .topbar-user { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .user-badge { background: rgba(255,255,255,0.12); padding: 6px 10px; border-radius: 999px; }
 
-.statusbar { background: #eef2f6; border-bottom: 1px solid var(--border); padding: 6px 16px; }
+.statusbar { background: var(--statusbar-bg); border-bottom: 1px solid var(--border); padding: 6px 16px; }
 .statusbar-inner { display: flex; align-items: center; gap: 12px; font-size: 12px; flex-wrap: wrap; }
 .status-ok { color: var(--good); }
 .status-error { color: var(--danger); }
 .status-loading { color: var(--accent-dark); }
 
-.filterbar { background: #fff; border-bottom: 1px solid var(--border); padding: 10px 16px; position: sticky; top: 0; z-index: 5; }
-.filterbar-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; }
+.filterbar { background: var(--card-bg); border-bottom: 1px solid var(--border); padding: 10px 16px; position: sticky; top: 0; z-index: 5; }
+.filterbar-row { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 8px; align-items: flex-end; }
 .filter-group { min-width: 140px; }
 .filter-label { font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); margin-bottom: 3px; font-weight: 600; }
 .filter-disabled-note { font-size: 11px; color: var(--text-muted); font-style: italic; padding-top: 4px; }
 
 .multiselect { position: relative; }
-.multiselect-summary { border: 1px solid var(--border); background: #fff; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; min-width: 110px; text-align: left; }
-.multiselect-panel { position: absolute; top: 100%; left: 0; background: #fff; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,0.12); padding: 8px; max-height: 220px; overflow-y: auto; min-width: 200px; z-index: 20; }
+.multiselect-summary { border: 1px solid var(--border); background: var(--input-bg); border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; min-width: 110px; text-align: left; color: var(--text); }
+.multiselect-panel { position: absolute; top: 100%; left: 0; background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 20px var(--shadow-color-strong); padding: 8px; max-height: 220px; overflow-y: auto; min-width: 200px; z-index: 20; }
 .multiselect-panel.hidden { display: none; }
-.multiselect-row { display: block; font-size: 13px; padding: 3px 4px; white-space: nowrap; cursor: pointer; }
+.multiselect-row { display: block; font-size: 13px; padding: 3px 4px; white-space: nowrap; cursor: pointer; color: var(--text); }
 
 .searchbar { margin-top: 4px; }
 
@@ -78,16 +131,18 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px; }
 .kpi-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px; text-align: center; }
 .kpi-value { font-size: 18px; font-weight: 700; color: var(--header-bg); }
+:root[data-theme="dark"] .kpi-value { color: var(--text); }
 .kpi-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
 .table-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
-.table-title { font-weight: 700; font-size: 14px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.table-title { font-weight: 700; font-size: 14px; padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.table-title-text { flex: 1; }
 .table-scroll { overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 640px; }
-.data-table th { position: sticky; top: 0; background: #f0f3f6; text-align: left; padding: 8px 10px; cursor: pointer; white-space: nowrap; border-bottom: 1px solid var(--border); user-select: none; }
-.data-table td { padding: 7px 10px; border-bottom: 1px solid #eef1f4; white-space: nowrap; }
+.data-table th { position: sticky; top: 0; background: var(--surface-2); color: var(--text); text-align: left; padding: 8px 10px; cursor: pointer; white-space: nowrap; border-bottom: 1px solid var(--border); user-select: none; }
+.data-table td { padding: 7px 10px; border-bottom: 1px solid var(--row-border); white-space: nowrap; }
 .data-table th.num, .data-table td.num { text-align: right; }
-.data-table tbody tr:hover { background: #f7fafd; }
+.data-table tbody tr:hover { background: var(--row-hover); }
 .empty-row { text-align: center; color: var(--text-muted); padding: 18px !important; }
 
 .loading-block, .error-block { padding: 40px 16px; text-align: center; color: var(--text-muted); }
@@ -101,8 +156,19 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 /* Shown above the (still-visible) previous numbers while a filter/month
    change is re-querying Google Sheets, so a slow refresh never looks
    like the filter silently did nothing. */
-.updating-banner { background: #fff6e0; color: #8a6d00; border: 1px solid #f0dfa0; padding: 9px 14px; border-radius: 8px; margin-bottom: 14px; font-weight: 600; text-align: center; }
+.updating-banner { background: var(--updating-bg); color: var(--updating-text); border: 1px solid var(--updating-border); padding: 9px 14px; border-radius: 8px; margin-bottom: 14px; font-weight: 600; text-align: center; }
 .content-stale { opacity: 0.5; filter: grayscale(35%); transition: opacity 0.15s; }
+
+/* Download buttons (per-table CSV, per-page CSV) */
+.btn-download { border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 6px; padding: 5px 9px; font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.btn-download:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.page-toolbar { display: flex; align-items: center; justify-content: flex-end; margin: -6px 0 12px; }
+.btn-download-page { border: 1px solid var(--accent); background: var(--card-bg); color: var(--accent); border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.btn-download-page:hover { background: var(--accent); color: var(--on-accent); }
+
+/* Theme toggle */
+.theme-toggle { background: rgba(255,255,255,0.12); color: var(--header-text); border: 1px solid rgba(255,255,255,0.35); border-radius: 999px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.theme-toggle:hover { background: rgba(255,255,255,0.22); }
 
 @media (max-width: 640px) {
   .topbar-title { font-size: 14px; }
@@ -113,29 +179,47 @@ html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); f
 .gate-note { font-size: 11px; color: var(--text-muted); margin-top: 14px; text-align: center; }
 
 /* Page nav tabs (Summary / All Customers-Outlets / Yesterday's Sales) */
-.pagenav { display: flex; gap: 8px; padding: 8px 16px; background: #fff; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-.tab-btn { border: 1px solid var(--border); background: #eef1f4; color: var(--text); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.pagenav { display: flex; gap: 8px; padding: 8px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.tab-btn { border: 1px solid var(--border); background: var(--surface); color: var(--text); padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .tab-btn:hover { filter: brightness(0.97); }
-.tab-btn-active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tab-btn-active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .filterbar-note { padding: 10px 16px; font-size: 12px; color: var(--text-muted); font-style: italic; }
 
 /* Expandable table rows ("+"/"−" drill-down) */
 th.expand-col, td.expand-col { width: 34px; padding-left: 10px; padding-right: 4px; }
-.expand-btn { width: 26px; height: 26px; border: 1px solid var(--border); background: #eef1f4; color: var(--text); border-radius: 6px; font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer; }
-.expand-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
-tr.detail-row td.detail-cell { background: #f7f9fb; padding: 10px 10px 14px 34px; border-bottom: 1px solid var(--border); }
+.expand-btn { width: 26px; height: 26px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 6px; font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer; }
+.expand-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* Inline secondary "+"/"−" toggle embedded inside one column's cell
+   (e.g. SKU Dist Target on the Outlets page) — smaller than .expand-btn
+   since it sits next to a number rather than leading the row. */
+.sx-btn { margin-left: 6px; width: 20px; height: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--text); border-radius: 5px; font-size: 12px; font-weight: 700; line-height: 1; cursor: pointer; padding: 0; vertical-align: middle; }
+.sx-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+tr.detail-row td.detail-cell { background: var(--detail-bg); padding: 10px 10px 14px 34px; border-bottom: 1px solid var(--border); }
 tr.detail-row .table-card { box-shadow: none; border: 1px solid var(--border); margin: 0; }
 .loading-block-inline { padding: 8px 4px; font-size: 12px; color: var(--text-muted); }
 
 /* Outlet Details page — outlet picker */
-.outlet-selector { padding: 12px 16px; background: #fff; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
+.outlet-selector { padding: 12px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
 .outlet-selector .field-label { margin: 0; }
 .outlet-selector select.input { width: 100%; }
 
 /* "Not supplied this month" row highlight (Outlet Details -> SKU breakdown) */
-tr.row-not-supplied td { background: #fdecea; color: #9b1c1c; }
-tr.row-not-supplied td:first-child { border-left: 4px solid #d33; font-weight: 600; }
+tr.row-not-supplied td { background: var(--highlight-bg); color: var(--highlight-text); }
+tr.row-not-supplied td:first-child { border-left: 4px solid var(--highlight-border); font-weight: 600; }
 </style>
+<script>
+/* Applies a remembered dark-theme choice before the page paints, so a
+   user who picked dark last time never sees a flash of the light theme
+   first. Default (nothing remembered, or "light") is light — untouched. */
+(function () {
+  try {
+    if (localStorage.getItem("zbm_theme_v1") === "dark") {
+      document.documentElement.setAttribute("data-theme", "dark");
+    }
+  } catch (e) {}
+})();
+</script>
 </head>
 <body>
 <!-- ===================================================================
@@ -1248,7 +1332,18 @@ async function buildAgencyFocusData(targetSheetId, targetColMap, whereBase, agen
   const agencyId = colId(targetColMap, ["Agency"]);
   const whereT = andJoin(whereBase, eqAny(agencyId, [agencyName]));
   const scopedSalesRows = salesRowsScoped.filter((r) => r.agency === agencyName);
-  return buildSummaryData(targetSheetId, targetColMap, whereT, scopedSalesRows, user);
+  const [summary, outlets, skus] = await Promise.all([
+    buildSummaryData(targetSheetId, targetColMap, whereT, scopedSalesRows, user),
+    buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, scopedSalesRows),
+    buildSkusData(targetSheetId, targetColMap, whereT, scopedSalesRows),
+  ]);
+  // Unlike the whole-company Summary page (Top 10 Customers / Top 20
+  // SKUs), Agency Focus shows the FULL outlet/SKU list for this one
+  // locked agency — the same unlimited builders the Outlets/0 Billing
+  // pages already use, just re-run here scoped to this agency.
+  summary.allOutlets = outlets.rows;
+  summary.allSkus = skus.rows;
+  return summary;
 }
 
 /* ---------------------------------------------------------------------
@@ -1325,6 +1420,93 @@ async function buildOutletAgencySkuBreakdown(targetSheetId, targetColMap, whereB
     const label = info ? info.label : ((slice[0] && slice[0].itemDesc) || code);
     return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_OUTLET);
   }).sort((x, y) => y.target - x.target);
+}
+
+/* On-demand "every target-bearing SKU at one OUTLET, across ALL
+   agencies" breakdown — same row shape as buildOutletAgencySkuBreakdown
+   (via mergeRow, so it carries lastSupply too) but scoped only by Cust
+   Site Code, with no Agency filter. Used by the "All Customers / Outlets"
+   page's second "+" (embedded in the SKU Dist Target column) to show
+   exactly which of that outlet's target SKUs have not been supplied
+   there this month — the caller filters the returned rows down to
+   lastSupply === null, which by construction comes out to exactly
+   (SKU Dist Target - SKU Dist Ach) on that outlet's row, since distTarget/
+   distAch there are computed from this same Cust Site Code scope. */
+async function buildOutletSkuBreakdown(targetSheetId, targetColMap, whereBase, custCode, salesRowsScoped) {
+  const custId = colId(targetColMap, ["Cust Site Code"]);
+  const scopedWhere = andJoin(whereBase, eqAnyNumericSafe(custId, [custCode]));
+  const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", scopedWhere, {});
+  const outletSalesRows = salesRowsScoped.filter((r) => r.custCode === custCode);
+  const sBySku = groupBy(outletSalesRows, "itemCode");
+  const skuKeys = new Set([...skuSumMap.keys(), ...sBySku.keys()]);
+  return [...skuKeys].filter(Boolean).map((code) => {
+    const info = skuSumMap.get(code);
+    const slice = sBySku.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].itemDesc) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_OUTLET);
+  }).sort((x, y) => y.target - x.target);
+}
+
+/* On-demand "every target-bearing OUTLET for one SKU, within the current
+   scope" breakdown — the mirror image of buildOutletSkuBreakdown (SKU per
+   outlet vs. here, outlet per SKU). Used by the Agency Focus page's SKU
+   table: its second "+" (embedded in the Outlet Dist Target column) shows
+   exactly which outlets carrying a target for that one SKU have not been
+   supplied it yet this month. */
+async function buildSkuOutletBreakdown(targetSheetId, targetColMap, whereBase, itemCode, salesRowsScoped) {
+  const itemId = colId(targetColMap, ["Item Code"]);
+  const scopedWhere = andJoin(whereBase, eqAnyNumericSafe(itemId, [itemCode]));
+  const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", scopedWhere, {});
+  const skuSalesRows = salesRowsScoped.filter((r) => r.itemCode === itemCode);
+  const sByCust = groupBy(skuSalesRows, "custCode");
+  const custKeys = new Set([...custSumMap.keys(), ...sByCust.keys()]);
+  return [...custKeys].filter(Boolean).map((code) => {
+    const info = custSumMap.get(code);
+    const slice = sByCust.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].custSite) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_SKU);
+  }).sort((x, y) => y.target - x.target);
+}
+
+/* On-demand "every target-bearing OUTLET for one Promo/Regular type,
+   within the current scope" breakdown — same shape again, scoped by the
+   Promo_Regular field instead of a single outlet or SKU. Used by the
+   Agency Focus page's Promo/Regular table: its second "+" (embedded in
+   the Outlet Dist Target column) shows which outlets carrying a target
+   under that promo/regular type at this agency have not been supplied
+   anything there yet this month. */
+async function buildPromoOutletBreakdown(targetSheetId, targetColMap, whereBase, promoRegValue, salesRowsScoped) {
+  const promoId = colId(targetColMap, ["Promo_Regular ?"]);
+  const scopedWhere = andJoin(whereBase, eqAny(promoId, [promoRegValue]));
+  const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", scopedWhere, {});
+  const promoSalesRows = salesRowsScoped.filter((r) => r.promoReg === promoRegValue);
+  const sByCust = groupBy(promoSalesRows, "custCode");
+  const custKeys = new Set([...custSumMap.keys(), ...sByCust.keys()]);
+  return [...custKeys].filter(Boolean).map((code) => {
+    const info = custSumMap.get(code);
+    const slice = sByCust.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].custSite) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_SKU);
+  }).sort((x, y) => y.target - x.target);
+}
+
+/* Agency Focus page's own outlet list — reuses buildOutletsData wholesale
+   (unlimited, same as the main Outlets page) then attaches which salesman
+   ("Collector") covers each outlet, pulled from the TARGET sheet the same
+   way the outlet's own name is (one extra small query, fired in parallel).
+   Assumes one salesman per outlet within this one locked agency, same
+   "one label per group" assumption targetGroupSumWithLabel already makes
+   for the outlet's own name. */
+async function buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+  const [outletsResult, salesmanMap] = await Promise.all([
+    buildOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped),
+    targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Collector", whereT, {}),
+  ]);
+  outletsResult.rows.forEach((row) => {
+    const info = salesmanMap.get(row._custCode);
+    row.salesman = info ? info.label : "";
+  });
+  return outletsResult;
 }
 
 /* ---------------------------------------------------------------------
@@ -1476,6 +1658,98 @@ function el(tag, attrs, children) {
 }
 
 /* ---------------------------------------------------------------------
+   THEME (light / dark) — default is light (no attribute at all); a
+   choice is remembered in localStorage so it sticks across visits on
+   the same device. A tiny inline script in <head> (see index.html)
+   applies a remembered "dark" choice before first paint so there's no
+   flash of light before switching over; everything below is just the
+   toggle control + keeping every open toggle button's label in sync.
+   --------------------------------------------------------------------- */
+const THEME_KEY = "zbm_theme_v1";
+function getTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
+function applyTheme(theme) {
+  if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
+  else document.documentElement.removeAttribute("data-theme");
+}
+function themeToggleLabel() {
+  return getTheme() === "dark" ? "☀ Light" : "🌙 Dark";
+}
+function toggleTheme() {
+  const next = getTheme() === "dark" ? "light" : "dark";
+  applyTheme(next);
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+  document.querySelectorAll(".theme-toggle").forEach((btn) => { btn.textContent = themeToggleLabel(); });
+}
+function renderThemeToggleButton() {
+  return el("button", { class: "theme-toggle", type: "button", title: "Switch between light and dark theme", onclick: toggleTheme }, [themeToggleLabel()]);
+}
+
+/* ---------------------------------------------------------------------
+   DOWNLOAD TO EXCEL/CSV — every table gets its own "⬇ CSV" button
+   (downloads exactly what's on screen, respecting the current sort),
+   and every page gets one "Download Page" button that combines every
+   table currently shown on that page (including the KPI cards) into a
+   single CSV with a blank line between each table's section — opens
+   straight into Excel like any other CSV. No server round-trip and no
+   extra library: everything here runs in the browser via a Blob +
+   temporary download link.
+   --------------------------------------------------------------------- */
+let pageTableRegistry = []; // reset at the top of every page render function, refilled by renderTable/renderExpandableTable/renderKpiCards as they run
+function resetPageTableRegistry() { pageTableRegistry = []; }
+function registerTableForDownload(title, columns, rows) {
+  if (!columns || !rows) return;
+  pageTableRegistry.push({ title: title || "Table", columns, rows });
+}
+function csvEscapeCell(v) {
+  const s = v == null ? "" : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function tableToCsvText(columns, rows) {
+  const header = columns.map((c) => csvEscapeCell(c.label || c.key));
+  const body = rows.map((r) => columns.map((c) => {
+    const val = c.fmt ? c.fmt(r[c.key], r) : r[c.key];
+    return csvEscapeCell(val);
+  }).join(","));
+  return [header.join(","), ...body].join("\r\n");
+}
+function safeFileNamePart(s) {
+  return String(s || "table").replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "table";
+}
+function triggerCsvDownload(filename, csvBody) {
+  // Leading BOM so Excel (Windows especially) opens the file as UTF-8
+  // instead of guessing the wrong encoding and garbling any non-ASCII text.
+  const blob = new Blob(["﻿" + csvBody], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function downloadTableCSV(title, columns, rows) {
+  const stamp = new Date().toISOString().slice(0, 10);
+  triggerCsvDownload("ZBM_" + safeFileNamePart(title) + "_" + stamp + ".csv", tableToCsvText(columns, rows));
+}
+function downloadPageCSV(pageLabel) {
+  if (!pageTableRegistry.length) return;
+  const stamp = new Date().toISOString().slice(0, 10);
+  const sections = pageTableRegistry.map((t) => t.title + "\r\n" + tableToCsvText(t.columns, t.rows));
+  triggerCsvDownload("ZBM_" + safeFileNamePart(pageLabel) + "_" + stamp + ".csv", sections.join("\r\n\r\n"));
+}
+/* Appended right after a page's <h2 class="page-title"> once real table
+   content is about to render (never shown on a bare loading/error
+   screen, since there'd be nothing yet worth downloading). */
+function renderPageDownloadToolbar(pageLabel) {
+  const bar = el("div", { class: "page-toolbar" });
+  const btn = el("button", { class: "btn-download-page", type: "button", title: "Download every table on this page as one Excel-ready CSV file" }, ["⬇ Download Page (Excel/CSV)"]);
+  btn.addEventListener("click", () => downloadPageCSV(pageLabel));
+  bar.appendChild(btn);
+  return bar;
+}
+
+/* ---------------------------------------------------------------------
    LOGIN SCREEN
    --------------------------------------------------------------------- */
 function renderLogin(errorMsg) {
@@ -1506,6 +1780,9 @@ function renderLogin(errorMsg) {
   ]);
 
   root.appendChild(el("div", { class: "login-wrap" }, [card]));
+  root.appendChild(el("div", { style: "position:fixed;top:12px;right:12px;z-index:50;" }, [
+    (() => { const b = renderThemeToggleButton(); b.style.background = "rgba(0,0,0,0.06)"; b.style.color = "var(--text)"; b.style.borderColor = "var(--border)"; return b; })(),
+  ]));
 
   const doLogin = () => {
     const uname = select.value;
@@ -1534,8 +1811,12 @@ function logout() {
   outletDetailAgencies = null;
   currentAgencyFocus = null;
   resetExpandable("alloutlets");
+  resetExpandable("alloutlets_notsupplied");
   resetExpandable("y_outlet");
   resetExpandable("od_agency");
+  resetExpandable("af_promo_notsupplied");
+  resetExpandable("af_outlet_notsupplied");
+  resetExpandable("af_sku_notsupplied");
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
   renderLogin();
 }
@@ -1603,6 +1884,7 @@ function renderAppShell() {
       el("div", { class: "topbar-title" }, ["ZBM Sales Dashboard"]),
       el("div", { class: "topbar-user" }, [
         el("span", { class: "user-badge" }, [`${state.user.username} · ${state.user.title}`]),
+        renderThemeToggleButton(),
         el("button", { class: "btn btn-ghost", onclick: logout }, ["Log out"]),
       ]),
     ]),
@@ -1846,9 +2128,10 @@ document.addEventListener("click", (e) => {
    --------------------------------------------------------------------- */
 function renderTable(tableId, title, columns, rows, opts) {
   opts = opts || {};
+  const sx = opts.secondaryExpand;
+  ensureSecondaryExpandState(sx);
   const timeGonePct = computeTimeGonePct(state.month);
   const wrap = el("div", { class: "table-card" });
-  wrap.appendChild(el("div", { class: "table-title" }, [title]));
   const sortState = state.sort[tableId] || { col: null, dir: -1 };
   let sorted = rows.slice();
   if (sortState.col) {
@@ -1858,6 +2141,14 @@ function renderTable(tableId, title, columns, rows, opts) {
       return ((va || 0) - (vb || 0)) * sortState.dir;
     });
   }
+  registerTableForDownload(title, columns, sorted);
+  const titleBar = el("div", { class: "table-title" }, [el("span", { class: "table-title-text" }, [title])]);
+  if (sorted.length) {
+    const dlBtn = el("button", { class: "btn-download", type: "button", title: "Download this table as CSV (opens in Excel)" }, ["⬇ CSV"]);
+    dlBtn.addEventListener("click", () => downloadTableCSV(title, columns, sorted));
+    titleBar.appendChild(dlBtn);
+  }
+  wrap.appendChild(titleBar);
   const scrollWrap = el("div", { class: "table-scroll" });
   const table = el("table", { class: "data-table" });
   const thead = el("thead");
@@ -1887,9 +2178,15 @@ function renderTable(tableId, title, columns, rows, opts) {
         const raw = c.raw ? c.raw(r) : r[c.key];
         if (typeof raw === "number" && !isNaN(raw)) cls += (raw < timeGonePct ? " pct-behind" : " pct-ahead");
       }
-      tr.appendChild(el("td", { class: cls }, [val == null ? "-" : String(val)]));
+      const td = el("td", { class: cls }, [val == null ? "-" : String(val)]);
+      if (sx && c.key === sx.columnKey) td.appendChild(secondaryExpandButtonFor(sx, r));
+      tr.appendChild(td);
     });
     tbody.appendChild(tr);
+    if (sx) {
+      const detailTr = secondaryExpandDetailRowFor(sx, r, columns.length);
+      if (detailTr) tbody.appendChild(detailTr);
+    }
   });
   table.appendChild(tbody);
   scrollWrap.appendChild(table);
@@ -1935,17 +2232,84 @@ function toggleExpand(tableId, key, row, opts) {
   });
 }
 
+/* ---------------------------------------------------------------------
+   SECONDARY "+"/"−" TOGGLE — an inline expand button embedded in one
+   specific column's cell (rather than its own leading column), used by
+   BOTH renderTable and renderExpandableTable via opts.secondaryExpand:
+   { columnKey (which column's cell gets the inline button), tableId (its
+   own expand/cache namespace, independent of the table's primary one, if
+   any), keyOf(row)->string, loadDetail(row)->Array|Promise<Array>,
+   detailColumns, detailTitle(row)->string, detailRowClass?(detailRow)->
+   string, emptyText?: string, buttonTitle?/collapseTitle?: string }.
+   Reuses the exact same expandState/expandCache/toggleExpand machinery
+   as the primary "+" column, just keyed under its own tableId so the two
+   never collide on the same row. First introduced for the "All Customers
+   / Outlets" page (outlet row -> SKUs never supplied this month) and the
+   Agency Focus page's three tables (outlets/SKUs not supplied, per
+   Promo-Regular type / per outlet / per SKU).
+   --------------------------------------------------------------------- */
+function ensureSecondaryExpandState(sx) {
+  if (!sx) return;
+  expandState[sx.tableId] = expandState[sx.tableId] || new Set();
+  expandCache[sx.tableId] = expandCache[sx.tableId] || new Map();
+}
+function secondaryExpandButtonFor(sx, r) {
+  const key2 = sx.keyOf(r);
+  const isExpanded2 = expandState[sx.tableId].has(key2);
+  const btn = el("button", { class: "sx-btn", type: "button", title: isExpanded2 ? (sx.collapseTitle || "Hide") : (sx.buttonTitle || "Show breakdown") }, [isExpanded2 ? "−" : "+"]);
+  btn.addEventListener("click", (e) => { e.stopPropagation(); toggleExpand(sx.tableId, key2, r, sx); });
+  return btn;
+}
+function secondaryExpandDetailRowFor(sx, r, colspan) {
+  const key2 = sx.keyOf(r);
+  if (!expandState[sx.tableId].has(key2)) return null;
+  const detailTr2 = el("tr", { class: "detail-row" });
+  const detailTd2 = el("td", { colspan: String(colspan), class: "detail-cell" });
+  const cacheEntry2 = expandCache[sx.tableId].get(key2);
+  if (!cacheEntry2) {
+    detailTd2.appendChild(el("div", { class: "loading-block loading-block-inline" }, ["Loading…"]));
+  } else if (cacheEntry2.error) {
+    detailTd2.appendChild(el("div", { class: "error-block" }, [cacheEntry2.error]));
+  } else if (!cacheEntry2.rows.length) {
+    detailTd2.appendChild(el("div", { class: "loading-block loading-block-inline" }, [sx.emptyText || "Nothing to show."]));
+  } else {
+    detailTd2.appendChild(renderTable(
+      sx.tableId + "__d__" + key2,
+      sx.detailTitle ? sx.detailTitle(r) : "",
+      sx.detailColumns,
+      cacheEntry2.rows,
+      { rowClass: sx.detailRowClass }
+    ));
+  }
+  detailTr2.appendChild(detailTd2);
+  return detailTr2;
+}
+
 /* opts: { keyOf(row)->string, loadDetail(row)->Array|Promise<Array>,
    detailColumns, detailTitle(row)->string, detailRowClass?(detailRow)->string
    — optional per-row CSS class for the nested detail table, e.g. to
-   highlight a SKU never supplied this month in red. } */
+   highlight a SKU never supplied this month in red.
+
+   opts.secondaryExpand (optional) — a SECOND, independent "+"/"−" toggle
+   embedded inline in one specific column's cell (rather than its own
+   leading column), with its own expand-state/cache namespace so it never
+   interferes with the primary "+" column. Shape: { columnKey (which
+   column's cell gets the inline button), tableId (its own expand/cache
+   namespace), keyOf(row)->string, loadDetail(row)->Array|Promise<Array>,
+   detailColumns, detailTitle(row)->string, detailRowClass?(detailRow)->
+   string, emptyText?: string, buttonTitle?/collapseTitle?: string }. Used
+   by the "All Customers / Outlets" page to let a manager expand exactly
+   the SKU Dist Target figure on a row into the list of that outlet's
+   target-bearing SKUs never supplied this month, without disturbing the
+   existing per-row agency breakdown "+" . */
 function renderExpandableTable(tableId, title, columns, rows, opts) {
   expandState[tableId] = expandState[tableId] || new Set();
   expandCache[tableId] = expandCache[tableId] || new Map();
+  const sx = opts.secondaryExpand;
+  ensureSecondaryExpandState(sx);
 
   const timeGonePct = computeTimeGonePct(state.month);
   const wrap = el("div", { class: "table-card" });
-  wrap.appendChild(el("div", { class: "table-title" }, [title]));
   const sortState = state.sort[tableId] || { col: null, dir: -1 };
   let sorted = rows.slice();
   if (sortState.col) {
@@ -1955,6 +2319,14 @@ function renderExpandableTable(tableId, title, columns, rows, opts) {
       return ((va || 0) - (vb || 0)) * sortState.dir;
     });
   }
+  registerTableForDownload(title, columns, sorted);
+  const titleBar = el("div", { class: "table-title" }, [el("span", { class: "table-title-text" }, [title])]);
+  if (sorted.length) {
+    const dlBtn = el("button", { class: "btn-download", type: "button", title: "Download this table as CSV (opens in Excel)" }, ["⬇ CSV"]);
+    dlBtn.addEventListener("click", () => downloadTableCSV(title, columns, sorted));
+    titleBar.appendChild(dlBtn);
+  }
+  wrap.appendChild(titleBar);
   const scrollWrap = el("div", { class: "table-scroll" });
   const table = el("table", { class: "data-table" });
   const thead = el("thead");
@@ -1989,7 +2361,9 @@ function renderExpandableTable(tableId, title, columns, rows, opts) {
         const raw = c.raw ? c.raw(r) : r[c.key];
         if (typeof raw === "number" && !isNaN(raw)) cls += (raw < timeGonePct ? " pct-behind" : " pct-ahead");
       }
-      tr.appendChild(el("td", { class: cls }, [val == null ? "-" : String(val)]));
+      const td = el("td", { class: cls }, [val == null ? "-" : String(val)]);
+      if (sx && c.key === sx.columnKey) td.appendChild(secondaryExpandButtonFor(sx, r));
+      tr.appendChild(td);
     });
     tbody.appendChild(tr);
 
@@ -2014,6 +2388,11 @@ function renderExpandableTable(tableId, title, columns, rows, opts) {
       }
       detailTr.appendChild(detailTd);
       tbody.appendChild(detailTr);
+    }
+
+    if (sx) {
+      const detailTr2 = secondaryExpandDetailRowFor(sx, r, columns.length + 1);
+      if (detailTr2) tbody.appendChild(detailTr2);
     }
   });
   table.appendChild(tbody);
@@ -2082,6 +2461,7 @@ function renderKpiCards(overall) {
     ["Outlet Distribution Ach", fmtNum(overall.distAch, 0), null],
     ["Outlet Distribution %", fmtPct(overall.distPct), overall.distPct],
   ];
+  registerTableForDownload("KPI Summary", [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }], cards.map(([label, val]) => ({ metric: label, value: val })));
   const wrap = el("div", { class: "kpi-grid" });
   cards.forEach(([label, val, rawPct]) => {
     let valClass = "kpi-value";
@@ -2167,6 +2547,7 @@ function renderSummaryTables() {
   const content = $("#content");
   if (!content) return;
   content.innerHTML = "";
+  resetPageTableRegistry();
 
   const cached = state.cache[state.month];
   if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
@@ -2201,6 +2582,7 @@ function renderSummaryTables() {
   if (summary.bySalesman) {
     tablesWrap.appendChild(renderTable("bysales", "Salesmen-wise Performance", SALESMAN_COLUMNS, summary.bySalesman));
   }
+  content.appendChild(renderPageDownloadToolbar("Summary — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(tablesWrap);
 }
 
@@ -2244,6 +2626,7 @@ async function fetchAndRenderOutlets() {
   outletsLoading = true;
   outletsError = null;
   resetExpandable("alloutlets"); // a real refetch invalidates any "+"-expanded agency breakdowns
+  resetExpandable("alloutlets_notsupplied"); // ...and any "+"-expanded not-supplied-SKU breakdowns
   renderOutletsPage();
 
   try {
@@ -2266,6 +2649,7 @@ function renderOutletsPage() {
   const content = $("#content");
   if (!content) return;
   content.innerHTML = "";
+  resetPageTableRegistry();
 
   const cached = state.cache[state.month];
   if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
@@ -2296,8 +2680,21 @@ function renderOutletsPage() {
       loadDetail: loadOutletAgencyDetail,
       detailColumns: OUTLET_AGENCY_COLUMNS,
       detailTitle: (r) => "Agency-wise sales at " + r.label,
+      secondaryExpand: {
+        columnKey: "distTarget", // the "SKU Dist Target" cell
+        tableId: "alloutlets_notsupplied",
+        keyOf: (r) => r._custCode,
+        loadDetail: loadOutletNotSuppliedSkus,
+        detailColumns: OUTLET_DETAIL_SKU_COLUMNS,
+        detailTitle: (r) => "Not supplied this month at " + r.label + " (" + (r.distTarget - r.distAch) + " of " + r.distTarget + " target SKUs)",
+        detailRowClass: () => "row-not-supplied",
+        emptyText: "Every target SKU has already been supplied at this outlet this month.",
+        buttonTitle: "Show SKUs not supplied this month at this outlet",
+        collapseTitle: "Hide not-supplied SKUs",
+      },
     }
   ));
+  content.appendChild(renderPageDownloadToolbar("All Customers-Outlets — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(wrap);
 }
 
@@ -2316,6 +2713,19 @@ function loadOutletAgencyDetail(row) {
   const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
   const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
   return buildOutletAgencyBreakdown(cached.targetSheetId, cached.targetColMap, whereT, row._custCode, salesRowsScoped);
+}
+
+/* For the Outlets page's second "+" (embedded in SKU Dist Target) —
+   every target SKU at this outlet across all agencies, filtered down to
+   just the ones never supplied there this month (lastSupply === null),
+   which is exactly what "SKU Dist Target minus SKU Dist Ach" represents. */
+function loadOutletNotSuppliedSkus(row) {
+  const cached = state.cache[state.month];
+  if (!cached) return [];
+  const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+  const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+  return buildOutletSkuBreakdown(cached.targetSheetId, cached.targetColMap, whereT, row._custCode, salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
 }
 
 /* ---------------------------------------------------------------------
@@ -2393,6 +2803,7 @@ function renderOutletDetailPage() {
   const content = $("#content");
   if (!content) return;
   content.innerHTML = "";
+  resetPageTableRegistry();
 
   const cached = state.cache[state.month];
   if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
@@ -2454,6 +2865,7 @@ function renderOutletDetailPage() {
       detailRowClass: (r) => (r.lastSupply ? "" : "row-not-supplied"),
     }
   ));
+  content.appendChild(renderPageDownloadToolbar("Outlet Details — " + state.pageOutletDetail.label + " — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(wrap);
 }
 
@@ -2474,6 +2886,19 @@ function loadOutletDetailSkuDetail(row) {
   const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
   return buildOutletAgencySkuBreakdown(cached.targetSheetId, cached.targetColMap, whereT, state.pageOutletDetail.custCode, row.label, salesRowsScoped);
 }
+
+/* Shared "outlet not supplied yet" detail-row column set — used by the
+   Agency Focus page's Promo/Regular table (outlets not supplied for one
+   promo/regular type) and SKU table (outlets not supplied for one SKU). */
+const NOT_SUPPLIED_OUTLET_COLUMNS = [
+  { key: "label", label: "Outlet" },
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "btg", label: "BTG", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "achPct", label: "Ach %", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "lastSupply", label: "Last Supplied This Month", fmt: (v) => (v ? dateKeyToLabel(v) : "Not supplied this month") },
+];
 
 /* ---------------------------------------------------------------------
    0 BILLING PAGE — outlets that carry a target but no real sales this
@@ -2529,6 +2954,7 @@ function renderZeroBillingPage() {
   const content = $("#content");
   if (!content) return;
   content.innerHTML = "";
+  resetPageTableRegistry();
 
   const cached = state.cache[state.month];
   if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
@@ -2551,12 +2977,14 @@ function renderZeroBillingPage() {
   const z = currentZeroBilling;
   const wrap = el("div", { class: zeroBillingLoading ? "content-stale" : "" });
 
-  const kpi = el("div", { class: "kpi-grid" }, [
+  const zbKpiCards = [
     ["0-Billed Outlets", fmtNum(z.outlets.length, 0)],
     ["Target (0-Billed Outlets)", fmtNum(z.outletsTotalTarget, 0)],
     ["0-Billed SKUs", fmtNum(z.skus.length, 0)],
     ["Target (0-Billed SKUs)", fmtNum(z.skusTotalTarget, 0)],
-  ].map(([label2, val]) => el("div", { class: "kpi-card" }, [
+  ];
+  registerTableForDownload("KPI Summary", [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }], zbKpiCards.map(([label2, val]) => ({ metric: label2, value: val })));
+  const kpi = el("div", { class: "kpi-grid" }, zbKpiCards.map(([label2, val]) => el("div", { class: "kpi-card" }, [
     el("div", { class: "kpi-value" }, [val]),
     el("div", { class: "kpi-label" }, [label2]),
   ])));
@@ -2565,6 +2993,7 @@ function renderZeroBillingPage() {
   wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no sales this month (a return-driven negative counts as 0-billed too)", ZERO_OUTLET_COLUMNS, z.outlets));
   wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but not sold at any outlet this month", ZERO_SKU_COLUMNS, z.skus));
 
+  content.appendChild(renderPageDownloadToolbar("0 Billing — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(wrap);
 }
 
@@ -2603,6 +3032,12 @@ async function fetchAndRenderAgencyFocus() {
   const reqId = ++state._contentReqId;
   agencyFocusLoading = true;
   agencyFocusError = null;
+  // A real refetch (new filters/month, or a fresh agency pick) invalidates
+  // any "+"-expanded not-supplied breakdowns on this page — they'd
+  // otherwise keep showing a stale figure for the previous scope.
+  resetExpandable("af_promo_notsupplied");
+  resetExpandable("af_outlet_notsupplied");
+  resetExpandable("af_sku_notsupplied");
   renderAgencyFocusPage();
 
   try {
@@ -2625,10 +3060,66 @@ async function fetchAndRenderAgencyFocus() {
   renderAgencyFocusPage();
 }
 
+/* Shared by all three of this page's "+"-not-supplied breakdowns below —
+   rebuilds the exact same agency-locked WHERE clause + sales-row slice
+   fetchAndRenderAgencyFocus itself uses, from current state, at the
+   moment the button is actually clicked (never prefetched). */
+function agencyFocusWhereAndSales() {
+  const cached = state.cache[state.month];
+  if (!cached) return null;
+  const agency = state.pageAgencyFocus.agency;
+  const filtersNoAgency = Object.assign({}, state.filters, { agency: [] });
+  const whereBase = buildGqlWhere(cached.targetColMap, state.user, filtersNoAgency);
+  const salesRowsScopedBase = applyFilters(cached.salesRows, filtersNoAgency);
+  const agencyId = colId(cached.targetColMap, ["Agency"]);
+  const whereT = andJoin(whereBase, eqAny(agencyId, [agency]));
+  const salesRowsScoped = salesRowsScopedBase.filter((r) => r.agency === agency);
+  return { cached, whereT, salesRowsScoped, agency };
+}
+
+/* Outlet table's "+" (SKU Dist Target) — SKUs never supplied at that one
+   outlet this month, within the locked agency. Reuses the exact same
+   data-layer function the "All Customers / Outlets" page uses. */
+function loadAgencyFocusOutletNotSuppliedSkus(row) {
+  const ctx = agencyFocusWhereAndSales();
+  if (!ctx) return [];
+  return buildOutletSkuBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._custCode, ctx.salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
+}
+
+/* SKU table's "+" (Outlet Dist Target) — outlets never supplied this one
+   SKU this month, within the locked agency. */
+function loadAgencyFocusSkuNotSuppliedOutlets(row) {
+  const ctx = agencyFocusWhereAndSales();
+  if (!ctx) return [];
+  return buildSkuOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._itemCode, ctx.salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
+}
+
+/* Promo/Regular table's "+" (Outlet Dist Target) — outlets carrying a
+   target under that one promo/regular type (within the locked agency)
+   never supplied anything there yet this month. */
+function loadAgencyFocusPromoNotSuppliedOutlets(row) {
+  const ctx = agencyFocusWhereAndSales();
+  if (!ctx) return [];
+  return buildPromoOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
+}
+
+/* The Agency Focus outlet table's own column set — the standard Outlet/
+   sku-distribution columns plus one extra "Salesman" column right after
+   the outlet name (buildAgencyFocusOutletsData attaches row.salesman). */
+function agencyFocusOutletColumns() {
+  const cols = metricColumnsWithLabel("Outlet", "sku");
+  cols.splice(1, 0, { key: "salesman", label: "Salesman" });
+  return cols;
+}
+
 function renderAgencyFocusPage() {
   const content = $("#content");
   if (!content) return;
   content.innerHTML = "";
+  resetPageTableRegistry();
 
   const cached = state.cache[state.month];
   if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
@@ -2674,14 +3165,68 @@ function renderAgencyFocusPage() {
   }
 
   const summary = currentAgencyFocus;
+  const agency = state.pageAgencyFocus.agency;
   const wrap = el("div", { class: agencyFocusLoading ? "content-stale" : "" });
   wrap.appendChild(renderKpiCards(summary.overall));
-  wrap.appendChild(renderTable("af_promo", "Promo / Regular Performance — " + state.pageAgencyFocus.agency, metricColumnsWithLabel("Type", "outlet"), summary.byPromo));
-  wrap.appendChild(renderTable("af_topcust", "Top 10 Customers (by Target) — " + state.pageAgencyFocus.agency + " — distribution = SKUs at this outlet", metricColumnsWithLabel("Outlet", "sku"), summary.topCustomers));
-  wrap.appendChild(renderTable("af_topsku", "Top 20 SKUs (by Target) — " + state.pageAgencyFocus.agency + " — distribution = outlets carrying this SKU", metricColumnsWithLabel("SKU", "outlet"), summary.topSkus));
+
+  wrap.appendChild(renderTable("af_promo", "Promo / Regular Performance — " + agency, metricColumnsWithLabel("Type", "outlet"), summary.byPromo, {
+    secondaryExpand: {
+      columnKey: "distTarget", // "Outlet Dist Target" on this table
+      tableId: "af_promo_notsupplied",
+      keyOf: (r) => r.label, // the promo/regular value itself (e.g. "PROMO")
+      loadDetail: loadAgencyFocusPromoNotSuppliedOutlets,
+      detailColumns: NOT_SUPPLIED_OUTLET_COLUMNS,
+      detailTitle: (r) => "Outlets not supplied this month — " + r.label + " (" + agency + ")",
+      detailRowClass: () => "row-not-supplied",
+      emptyText: "Every target outlet for this type has already been supplied this month.",
+      buttonTitle: "Show outlets not supplied this month for this type",
+      collapseTitle: "Hide not-supplied outlets",
+    },
+  }));
+
+  // Salesmen-wise sits right after Promo/Regular per explicit request —
+  // before the (now unlimited) Outlets/SKUs tables, not after them.
   if (summary.bySalesman) {
-    wrap.appendChild(renderTable("af_bysales", "Salesmen-wise Performance — " + state.pageAgencyFocus.agency, SALESMAN_COLUMNS, summary.bySalesman));
+    wrap.appendChild(renderTable("af_bysales", "Salesmen-wise Performance — " + agency, SALESMAN_COLUMNS, summary.bySalesman));
   }
+
+  // Full outlet list (not just Top 10) for this locked agency, with an
+  // extra Salesman column, and a "+" on SKU Dist Target for the SKUs
+  // never supplied at that outlet this month — identical feature to the
+  // "All Customers / Outlets" page, just agency-scoped here.
+  wrap.appendChild(renderTable("af_outlets", "All Customers / Outlets — " + agency + " — distribution = SKUs at this outlet", agencyFocusOutletColumns(), summary.allOutlets, {
+    secondaryExpand: {
+      columnKey: "distTarget", // "SKU Dist Target" on this table
+      tableId: "af_outlet_notsupplied",
+      keyOf: (r) => r._custCode,
+      loadDetail: loadAgencyFocusOutletNotSuppliedSkus,
+      detailColumns: OUTLET_DETAIL_SKU_COLUMNS,
+      detailTitle: (r) => "Not supplied this month at " + r.label + " (" + agency + ")",
+      detailRowClass: () => "row-not-supplied",
+      emptyText: "Every target SKU has already been supplied at this outlet this month.",
+      buttonTitle: "Show SKUs not supplied this month at this outlet",
+      collapseTitle: "Hide not-supplied SKUs",
+    },
+  }));
+
+  // Full SKU list (not just Top 20), with a "+" on Outlet Dist Target for
+  // the outlets that haven't been supplied that particular SKU yet.
+  wrap.appendChild(renderTable("af_skus", "All SKUs — " + agency + " — distribution = outlets carrying this SKU", metricColumnsWithLabel("SKU", "outlet"), summary.allSkus, {
+    secondaryExpand: {
+      columnKey: "distTarget", // "Outlet Dist Target" on this table
+      tableId: "af_sku_notsupplied",
+      keyOf: (r) => r._itemCode,
+      loadDetail: loadAgencyFocusSkuNotSuppliedOutlets,
+      detailColumns: NOT_SUPPLIED_OUTLET_COLUMNS,
+      detailTitle: (r) => "Outlets not supplied this month — " + r.label + " (" + agency + ")",
+      detailRowClass: () => "row-not-supplied",
+      emptyText: "Every outlet with a target for this SKU has already been supplied this month.",
+      buttonTitle: "Show outlets not supplied this month for this SKU",
+      collapseTitle: "Hide not-supplied outlets",
+    },
+  }));
+
+  content.appendChild(renderPageDownloadToolbar("Agency Focus — " + agency + " — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(wrap);
 }
 
@@ -2748,6 +3293,7 @@ function renderYesterdayPage() {
   const content = $("#content");
   if (!content) return;
   content.innerHTML = "";
+  resetPageTableRegistry();
 
   const py = state.pageYesterday || {};
   const label = py.dateLabel || computeYesterdayKey().label;
@@ -2762,12 +3308,14 @@ function renderYesterdayPage() {
   const d = py.data;
   const wrap = el("div", { class: py.loading ? "content-stale" : "" });
 
-  const kpi = el("div", { class: "kpi-grid" }, [
+  const yKpiCards = [
     ["Sales", fmtNum(d.totals.net, 0)],
     ["Return", fmtNum(d.totals.return, 0)],
     ["Outlets Billed", fmtNum(d.totals.outletsBilled, 0)],
     ["SKUs Sold", fmtNum(d.totals.skusSold, 0)],
-  ].map(([label2, val]) => el("div", { class: "kpi-card" }, [
+  ];
+  registerTableForDownload("KPI Summary", [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }], yKpiCards.map(([label2, val]) => ({ metric: label2, value: val })));
+  const kpi = el("div", { class: "kpi-grid" }, yKpiCards.map(([label2, val]) => el("div", { class: "kpi-card" }, [
     el("div", { class: "kpi-value" }, [val]),
     el("div", { class: "kpi-label" }, [label2]),
   ])));
@@ -2788,6 +3336,7 @@ function renderYesterdayPage() {
   wrap.appendChild(renderTable("y_agency", "Agency-wise Sales — " + label, yesterdayColumnsWithLabel("Agency"), d.byAgency));
   wrap.appendChild(renderTable("y_sku", "SKU-wise Sales — " + label, yesterdayColumnsWithLabel("SKU"), d.bySku));
 
+  content.appendChild(renderPageDownloadToolbar("Yesterdays Sales — " + label));
   content.appendChild(wrap);
 }
 
