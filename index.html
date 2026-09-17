@@ -276,6 +276,25 @@ const USERS = [
 const FULL_ACCESS_TITLES = ["GM", "BDM", "TME"];
 
 /* ---------------------------------------------------------------------
+   1b. "AGENCY FOCUS" ASSIGNMENTS — a small number of TME users each own
+   one or more specific agencies day-to-day and want a page locked to
+   just that agency (or agencies), on top of the full company-wide access
+   every TME already has everywhere else in the app. This is purely
+   ADDITIVE — it never restricts anyone; it only decides who gets the
+   extra "Agency Focus" tab and which agencies populate its picker.
+   Agency names here must match the real "Agency" column EXACTLY
+   (confirmed against the live Sep 2026 sheet): KC CONSUMER, DELICIO,
+   SHAN, TWININGS, ZYDUS WELLNESS, DANONE (plus others not assigned to
+   anyone here — BUHUMAID, CAPRISUN, FIGARO, KASIH, KDD, LESAFFRE,
+   PAL INTERNATIONAL, UPFIELD).
+   --------------------------------------------------------------------- */
+const AGENCY_FOCUS_ASSIGNMENTS = {
+  "SUSHANT": ["KC CONSUMER"],
+  "JUNAID": ["DELICIO", "SHAN", "TWININGS", "ZYDUS WELLNESS", "DANONE"],
+  "HAYAT": ["DELICIO", "SHAN", "TWININGS", "ZYDUS WELLNESS", "DANONE"],
+};
+
+/* ---------------------------------------------------------------------
    2. MONTH / GOOGLE SHEET REGISTRY
    Add a new month here when a new pair of sheets is created.
    --------------------------------------------------------------------- */
@@ -1215,17 +1234,50 @@ async function buildSummaryData(targetSheetId, targetColMap, whereT, salesRowsSc
 }
 
 /* ---------------------------------------------------------------------
+   9b. "AGENCY FOCUS" PAGE DATA BUILDER — reuses buildSummaryData wholesale
+   (same KPIs / Promo-Regular / Top Customers / Top SKUs / Salesmen-wise
+   tables an assigned TME already trusts), just with the WHERE clause and
+   the sales-rows slice both additionally locked to one Agency, on top of
+   whatever role scope + non-Agency filters already apply. Deliberately
+   ignores the app's own Agency filter (the caller passes a whereBase/
+   salesRowsScoped already built with filters.agency cleared) so a
+   leftover Agency selection from another page can never silently zero
+   out this page's results.
+   --------------------------------------------------------------------- */
+async function buildAgencyFocusData(targetSheetId, targetColMap, whereBase, agencyName, salesRowsScoped, user) {
+  const agencyId = colId(targetColMap, ["Agency"]);
+  const whereT = andJoin(whereBase, eqAny(agencyId, [agencyName]));
+  const scopedSalesRows = salesRowsScoped.filter((r) => r.agency === agencyName);
+  return buildSummaryData(targetSheetId, targetColMap, whereT, scopedSalesRows, user);
+}
+
+/* ---------------------------------------------------------------------
    10. "ALL CUSTOMERS / OUTLETS" PAGE DATA BUILDER
    Same shape/columns as the Summary page's "Top Customers" table, just
    with no limit — every outlet in the current role+filter scope, not
    just the top 10. Deliberately a separate, on-demand function (not
    folded into buildSummaryData) so visiting this page never adds extra
    Google Sheets queries to the normal Summary page load.
+
+   IMPORTANT — no restrictToKeys here, unlike the Summary page's top-10/
+   top-20 lists: those pass their (small, capped) code list into
+   targetDistinctSecondary as an extra WHERE restriction purely as a
+   server-side performance shortcut. Here the list is EVERY code in
+   scope — restricting to it adds nothing (both queries already share
+   the identical whereT + "Sales > 0" filter, so the distinct-code set
+   targetDistinctSecondary naturally returns is already exactly
+   `allCodes`) but the resulting WHERE clause grows with the number of
+   outlets, which for a manager's whole team or a GM's whole company can
+   run into the hundreds — long enough to blow past the browser's URL
+   length limit and make the <script src="..."> request itself fail
+   ("script failed to load"), confirmed as the real cause of 0 Billing/
+   Outlet Details erroring out for manager- and full-access-tier users.
+   Salesman-tier scope stayed small enough to never hit this.
    --------------------------------------------------------------------- */
 async function buildOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
   const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", whereT, {});
   const allCodes = [...custSumMap.keys()];
-  const custDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Cust Site Code", "Item Code", whereT, allCodes);
+  const custDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Cust Site Code", "Item Code", whereT);
   const sByCust = groupBy(salesRowsScoped, "custCode");
   const rows = allCodes.map((code) => {
     const row = mergeRow(custSumMap.get(code).label, { target: custSumMap.get(code).target, distTarget: custDistMap.get(code) || 0 }, sByCust.get(code) || [], KEY_SKU);
@@ -1353,7 +1405,14 @@ function buildYesterdaySummary(dayRows) {
 async function buildSkusData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
   const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", whereT, {});
   const allCodes = [...skuSumMap.keys()];
-  const skuDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Item Code", "Cust Site Code", whereT, allCodes);
+  // IMPORTANT — no restrictToKeys here, same reasoning as buildOutletsData
+  // above: allCodes is EVERY code already in scope for whereT, so it adds
+  // nothing as a restriction (targetDistinctSecondary's own distinct-code
+  // set is already exactly allCodes) but its OR-chain length grows with
+  // team/company size and can blow past the browser's URL length limit for
+  // manager/GM-tier scope, causing the gviz <script src> request itself to
+  // fail to load. See buildOutletsData's comment for the full writeup.
+  const skuDistMap = await targetDistinctSecondary(targetSheetId, targetColMap, "Item Code", "Cust Site Code", whereT);
   const sBySku = groupBy(salesRowsScoped, "itemCode");
   const rows = allCodes.map((code) => {
     const row = mergeRow(skuSumMap.get(code).label, { target: skuSumMap.get(code).target, distTarget: skuDistMap.get(code) || 0 }, sBySku.get(code) || [], KEY_OUTLET);
@@ -1400,6 +1459,7 @@ const state = {
   _contentDebounceTimer: null,
   pageYesterday: null, // { loading, error, data, dateLabel } — set by fetchAndRenderYesterday
   pageOutletDetail: { custCode: null, label: null }, // the salesman's currently-selected outlet on the Outlet Details page
+  pageAgencyFocus: { agency: null }, // the TME's currently-selected agency on the Agency Focus page
 };
 
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -1467,10 +1527,12 @@ function logout() {
   state.page = "summary";
   state.pageYesterday = null;
   state.pageOutletDetail = { custCode: null, label: null };
+  state.pageAgencyFocus = { agency: null };
   currentSummary = null;
   currentOutlets = null;
   currentZeroBilling = null;
   outletDetailAgencies = null;
+  currentAgencyFocus = null;
   resetExpandable("alloutlets");
   resetExpandable("y_outlet");
   resetExpandable("od_agency");
@@ -1568,14 +1630,21 @@ const PAGES = [
   { key: "outlets", label: "All Customers / Outlets" },
   { key: "outletdetail", label: "Outlet Details" },
   { key: "zerobilling", label: "0 Billing" },
+  // Only shown to a user with an entry in AGENCY_FOCUS_ASSIGNMENTS (currently
+  // Sushant, Junaid, Hayat) — everyone else never even sees the tab exist.
+  { key: "agencyfocus", label: "Agency Focus", visible: (user) => !!AGENCY_FOCUS_ASSIGNMENTS[user.username] },
   { key: "yesterday", label: "Yesterday's Sales" },
 ];
+
+function visiblePages() {
+  return PAGES.filter((p) => !p.visible || p.visible(state.user));
+}
 
 function renderPageNav() {
   const bar = $("#pagenav");
   if (!bar) return;
   bar.innerHTML = "";
-  PAGES.forEach((p) => {
+  visiblePages().forEach((p) => {
     const btn = el("button", {
       class: "tab-btn" + (state.page === p.key ? " tab-btn-active" : ""),
       type: "button",
@@ -1603,6 +1672,10 @@ function setPage(key) {
     if (state.pageOutletDetail.custCode && !outletDetailAgencies && !outletDetailLoading) fetchOutletDetailAgencies();
   }
   else if (key === "zerobilling") { if (currentZeroBilling) renderZeroBillingPage(); else fetchAndRenderZeroBilling(); }
+  else if (key === "agencyfocus") {
+    renderAgencyFocusPage(); // handles picking a default agency internally
+    if (state.pageAgencyFocus.agency && !currentAgencyFocus && !agencyFocusLoading) fetchAndRenderAgencyFocus();
+  }
 }
 
 /* Re-render whichever page is currently active without re-fetching —
@@ -1613,6 +1686,7 @@ function rerenderCurrentPage() {
   else if (state.page === "yesterday") renderYesterdayPage();
   else if (state.page === "outletdetail") renderOutletDetailPage();
   else if (state.page === "zerobilling") renderZeroBillingPage();
+  else if (state.page === "agencyfocus") renderAgencyFocusPage();
   else renderSummaryTables();
 }
 
@@ -1709,8 +1783,14 @@ function renderFilterBar() {
     loadMonth(v);
   }));
 
-  // Agency (multi)
-  row1.appendChild(multiSelectControl("Agency", opts.agency, state.filters.agency, () => scheduleContentRefresh()));
+  // Agency (multi) — hidden on Agency Focus, where the agency is fixed by
+  // the page's own picker instead (a leftover selection here would just
+  // be ignored there, which is more confusing left visible than hidden).
+  if (state.page === "agencyfocus") {
+    row1.appendChild(singleSelectControl("Agency", [], "ALL", () => {}, "Fixed to " + (state.pageAgencyFocus.agency || "the agency picked below") + " on this page"));
+  } else {
+    row1.appendChild(multiSelectControl("Agency", opts.agency, state.filters.agency, () => scheduleContentRefresh()));
+  }
 
   // Food / Non Food
   const pgOptions = [{ value: "ALL", label: "All" }, ...opts.prodGroup.map((v) => ({ value: v, label: v }))];
@@ -2039,18 +2119,21 @@ function scheduleContentRefresh() {
   currentOutlets = null;
   currentZeroBilling = null;
   outletDetailAgencies = null; // the selected outlet's agency breakdown also depends on the active filters
+  currentAgencyFocus = null; // the selected agency's breakdown also depends on the active (non-Agency) filters
   if (state._contentDebounceTimer) clearTimeout(state._contentDebounceTimer);
   state._contentDebounceTimer = setTimeout(() => {
     if (state.page === "outlets") fetchAndRenderOutlets();
     else if (state.page === "summary") fetchAndRenderContent();
     else if (state.page === "zerobilling") fetchAndRenderZeroBilling();
     else if (state.page === "outletdetail" && state.pageOutletDetail.custCode) fetchOutletDetailAgencies();
+    else if (state.page === "agencyfocus" && state.pageAgencyFocus.agency) fetchAndRenderAgencyFocus();
   }, 350);
   // Immediately show a lightweight "updating" state so the UI responds instantly.
   if (state.page === "outlets") { outletsLoading = true; renderOutletsPage(); }
   else if (state.page === "summary") { state.summaryLoading = true; renderSummaryTables(); }
   else if (state.page === "zerobilling") { zeroBillingLoading = true; renderZeroBillingPage(); }
   else if (state.page === "outletdetail") { outletDetailLoading = true; renderOutletDetailPage(); }
+  else if (state.page === "agencyfocus") { agencyFocusLoading = true; renderAgencyFocusPage(); }
 }
 
 async function fetchAndRenderContent() {
@@ -2134,6 +2217,12 @@ function renderContent() {
     outletDetailAgencies = null;
     renderOutletDetailPage(); // fetches its own outlet-list internally when currentOutlets is null
     if (state.pageOutletDetail.custCode) fetchOutletDetailAgencies();
+    return;
+  }
+  if (state.page === "agencyfocus") {
+    currentAgencyFocus = null;
+    renderAgencyFocusPage(); // picks a default agency internally if none is set yet
+    if (state.pageAgencyFocus.agency) fetchAndRenderAgencyFocus();
     return;
   }
   currentSummary = null;
@@ -2476,6 +2565,123 @@ function renderZeroBillingPage() {
   wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no sales this month (a return-driven negative counts as 0-billed too)", ZERO_OUTLET_COLUMNS, z.outlets));
   wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but not sold at any outlet this month", ZERO_SKU_COLUMNS, z.skus));
 
+  content.appendChild(wrap);
+}
+
+/* ---------------------------------------------------------------------
+   AGENCY FOCUS PAGE — visible only to a user with an entry in
+   AGENCY_FOCUS_ASSIGNMENTS (dashboard.js). Same KPI/Promo-Regular/Top
+   Customers/Top SKUs/Salesmen-wise layout as Summary, but locked to one
+   assigned agency (picked from a dropdown when more than one is
+   assigned; auto-selected with no dropdown when there's only one — e.g.
+   Sushant's single "KC CONSUMER"). Ignores the global Agency filter by
+   design (see buildAgencyFocusData's note in dashboard.js) but still
+   respects every other active filter (Product Group, Promo/Regular,
+   Cust Group, Search, Salesmen/Managers for a manager-tier assignee).
+   --------------------------------------------------------------------- */
+let currentAgencyFocus = null;
+let agencyFocusLoading = false;
+let agencyFocusError = null;
+
+function assignedAgenciesFor(user) {
+  return (user && AGENCY_FOCUS_ASSIGNMENTS[user.username]) || [];
+}
+
+function selectAgencyFocus(agency) {
+  state.pageAgencyFocus = { agency };
+  currentAgencyFocus = null;
+  fetchAndRenderAgencyFocus();
+}
+
+async function fetchAndRenderAgencyFocus() {
+  const content = $("#content");
+  if (!content) return;
+  const cached = state.cache[state.month];
+  const agency = state.pageAgencyFocus.agency;
+  if (!cached || !agency) return;
+
+  const reqId = ++state._contentReqId;
+  agencyFocusLoading = true;
+  agencyFocusError = null;
+  renderAgencyFocusPage();
+
+  try {
+    // Deliberately built from a copy of the filters with Agency cleared —
+    // this page's own agency picker is the single source of truth for
+    // which agency is in scope, never the global Agency filter.
+    const filtersNoAgency = Object.assign({}, state.filters, { agency: [] });
+    const whereBase = buildGqlWhere(cached.targetColMap, state.user, filtersNoAgency);
+    const salesRowsScopedBase = applyFilters(cached.salesRows, filtersNoAgency);
+    const data = await buildAgencyFocusData(cached.targetSheetId, cached.targetColMap, whereBase, agency, salesRowsScopedBase, state.user);
+    if (reqId !== state._contentReqId) return; // a newer request superseded this one
+    currentAgencyFocus = data;
+    agencyFocusLoading = false;
+    agencyFocusError = null;
+  } catch (err) {
+    if (reqId !== state._contentReqId) return;
+    agencyFocusLoading = false;
+    agencyFocusError = "Could not load " + agency + "'s figures: " + err.message;
+  }
+  renderAgencyFocusPage();
+}
+
+function renderAgencyFocusPage() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+
+  const cached = state.cache[state.month];
+  if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
+  if (state.error && !cached) { content.appendChild(el("div", { class: "error-block" }, [state.error])); return; }
+  if (!cached) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+
+  const assigned = assignedAgenciesFor(state.user);
+  if (!assigned.length) {
+    content.appendChild(el("div", { class: "error-block" }, ["No agency is assigned to this account."]));
+    return;
+  }
+
+  // Auto-pick the (only) agency for a single-agency user, or the first
+  // one alphabetically the first time a multi-agency user opens this page.
+  if (!state.pageAgencyFocus.agency || !assigned.includes(state.pageAgencyFocus.agency)) {
+    state.pageAgencyFocus = { agency: assigned.slice().sort()[0] };
+    currentAgencyFocus = null;
+  }
+
+  content.appendChild(el("h2", { class: "page-title" }, ["Agency Focus — " + state.pageAgencyFocus.agency + " — " + MONTHS.find((m) => m.key === state.month).label]));
+
+  if (assigned.length > 1) {
+    const selectorWrap = el("div", { class: "outlet-selector" });
+    selectorWrap.appendChild(el("label", { class: "field-label" }, ["Select an agency"]));
+    const sel = el("select", { class: "input", id: "agencyFocusSelect" }, assigned.slice().sort().map((a) =>
+      el("option", { value: a }, [a])
+    ));
+    sel.value = state.pageAgencyFocus.agency;
+    sel.addEventListener("change", () => selectAgencyFocus(sel.value));
+    selectorWrap.appendChild(sel);
+    content.appendChild(selectorWrap);
+  }
+
+  if (agencyFocusError) content.appendChild(el("div", { class: "error-block" }, [agencyFocusError]));
+  if (agencyFocusLoading && currentAgencyFocus) {
+    content.appendChild(el("div", { class: "updating-banner" }, ["Updating with your new filters — this can take a little while on a slow connection…"]));
+  } else if (agencyFocusLoading) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Loading " + state.pageAgencyFocus.agency + "'s figures…"]));
+  }
+  if (!currentAgencyFocus) {
+    if (!agencyFocusLoading && !agencyFocusError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+    return;
+  }
+
+  const summary = currentAgencyFocus;
+  const wrap = el("div", { class: agencyFocusLoading ? "content-stale" : "" });
+  wrap.appendChild(renderKpiCards(summary.overall));
+  wrap.appendChild(renderTable("af_promo", "Promo / Regular Performance — " + state.pageAgencyFocus.agency, metricColumnsWithLabel("Type", "outlet"), summary.byPromo));
+  wrap.appendChild(renderTable("af_topcust", "Top 10 Customers (by Target) — " + state.pageAgencyFocus.agency + " — distribution = SKUs at this outlet", metricColumnsWithLabel("Outlet", "sku"), summary.topCustomers));
+  wrap.appendChild(renderTable("af_topsku", "Top 20 SKUs (by Target) — " + state.pageAgencyFocus.agency + " — distribution = outlets carrying this SKU", metricColumnsWithLabel("SKU", "outlet"), summary.topSkus));
+  if (summary.bySalesman) {
+    wrap.appendChild(renderTable("af_bysales", "Salesmen-wise Performance — " + state.pageAgencyFocus.agency, SALESMAN_COLUMNS, summary.bySalesman));
+  }
   content.appendChild(wrap);
 }
 
