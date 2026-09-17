@@ -1509,6 +1509,49 @@ async function buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, 
   return outletsResult;
 }
 
+/* On-demand "every target-bearing OUTLET for one salesman (Collector),
+   within the current scope" breakdown — same shape as
+   buildPromoOutletBreakdown, scoped by the Collector field instead of
+   Promo_Regular. Used by the Agency Focus page's Salesmen-wise table:
+   its "+" on Outlet Dist Target shows which outlets assigned to that
+   salesman at this agency have not been supplied anything yet this
+   month. */
+async function buildSalesmanOutletBreakdown(targetSheetId, targetColMap, whereBase, salesmanName, salesRowsScoped) {
+  const collectorId = colId(targetColMap, ["Collector"]);
+  const scopedWhere = andJoin(whereBase, eqAny(collectorId, [salesmanName]));
+  const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", scopedWhere, {});
+  const salesmanSalesRows = salesRowsScoped.filter((r) => r.collector === salesmanName);
+  const sByCust = groupBy(salesmanSalesRows, "custCode");
+  const custKeys = new Set([...custSumMap.keys(), ...sByCust.keys()]);
+  return [...custKeys].filter(Boolean).map((code) => {
+    const info = custSumMap.get(code);
+    const slice = sByCust.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].custSite) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_SKU);
+  }).sort((x, y) => y.target - x.target);
+}
+
+/* On-demand "every target-bearing SKU for one salesman (Collector),
+   within the current scope" breakdown — the SKU-side mirror of
+   buildSalesmanOutletBreakdown above. Used by the Agency Focus page's
+   Salesmen-wise table: its "+" on SKU Dist Target shows which SKUs
+   assigned to that salesman at this agency have not been supplied
+   anywhere yet this month. */
+async function buildSalesmanSkuBreakdown(targetSheetId, targetColMap, whereBase, salesmanName, salesRowsScoped) {
+  const collectorId = colId(targetColMap, ["Collector"]);
+  const scopedWhere = andJoin(whereBase, eqAny(collectorId, [salesmanName]));
+  const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", scopedWhere, {});
+  const salesmanSalesRows = salesRowsScoped.filter((r) => r.collector === salesmanName);
+  const sBySku = groupBy(salesmanSalesRows, "itemCode");
+  const skuKeys = new Set([...skuSumMap.keys(), ...sBySku.keys()]);
+  return [...skuKeys].filter(Boolean).map((code) => {
+    const info = skuSumMap.get(code);
+    const slice = sBySku.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].itemDesc) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_OUTLET);
+  }).sort((x, y) => y.target - x.target);
+}
+
 /* ---------------------------------------------------------------------
    11. "YESTERDAY'S SALES" PAGE — a fixed, always-previous-calendar-day
    breakdown (agency-wise / SKU-wise / outlet-wise, with returns), built
@@ -1817,6 +1860,8 @@ function logout() {
   resetExpandable("af_promo_notsupplied");
   resetExpandable("af_outlet_notsupplied");
   resetExpandable("af_sku_notsupplied");
+  resetExpandable("af_salesman_notsupplied_outlets");
+  resetExpandable("af_salesman_notsupplied_skus");
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
   renderLogin();
 }
@@ -2128,8 +2173,8 @@ document.addEventListener("click", (e) => {
    --------------------------------------------------------------------- */
 function renderTable(tableId, title, columns, rows, opts) {
   opts = opts || {};
-  const sx = opts.secondaryExpand;
-  ensureSecondaryExpandState(sx);
+  const sxList = normalizeSecondaryExpand(opts.secondaryExpand);
+  sxList.forEach(ensureSecondaryExpandState);
   const timeGonePct = computeTimeGonePct(state.month);
   const wrap = el("div", { class: "table-card" });
   const sortState = state.sort[tableId] || { col: null, dir: -1 };
@@ -2179,14 +2224,14 @@ function renderTable(tableId, title, columns, rows, opts) {
         if (typeof raw === "number" && !isNaN(raw)) cls += (raw < timeGonePct ? " pct-behind" : " pct-ahead");
       }
       const td = el("td", { class: cls }, [val == null ? "-" : String(val)]);
-      if (sx && c.key === sx.columnKey) td.appendChild(secondaryExpandButtonFor(sx, r));
+      sxList.forEach((sx) => { if (c.key === sx.columnKey) td.appendChild(secondaryExpandButtonFor(sx, r)); });
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
-    if (sx) {
+    sxList.forEach((sx) => {
       const detailTr = secondaryExpandDetailRowFor(sx, r, columns.length);
       if (detailTr) tbody.appendChild(detailTr);
-    }
+    });
   });
   table.appendChild(tbody);
   scrollWrap.appendChild(table);
@@ -2248,6 +2293,15 @@ function toggleExpand(tableId, key, row, opts) {
    Agency Focus page's three tables (outlets/SKUs not supplied, per
    Promo-Regular type / per outlet / per SKU).
    --------------------------------------------------------------------- */
+/* opts.secondaryExpand accepts either a single config object (as
+   originally introduced) or an array of them, so one table can carry
+   more than one independent inline "+" — e.g. the Agency Focus page's
+   Salesmen-wise table has one on Outlet Dist Target and a separate one
+   on SKU Dist Target, each with its own tableId/cache namespace. */
+function normalizeSecondaryExpand(sx) {
+  if (!sx) return [];
+  return Array.isArray(sx) ? sx : [sx];
+}
 function ensureSecondaryExpandState(sx) {
   if (!sx) return;
   expandState[sx.tableId] = expandState[sx.tableId] || new Set();
@@ -2305,8 +2359,8 @@ function secondaryExpandDetailRowFor(sx, r, colspan) {
 function renderExpandableTable(tableId, title, columns, rows, opts) {
   expandState[tableId] = expandState[tableId] || new Set();
   expandCache[tableId] = expandCache[tableId] || new Map();
-  const sx = opts.secondaryExpand;
-  ensureSecondaryExpandState(sx);
+  const sxList = normalizeSecondaryExpand(opts.secondaryExpand);
+  sxList.forEach(ensureSecondaryExpandState);
 
   const timeGonePct = computeTimeGonePct(state.month);
   const wrap = el("div", { class: "table-card" });
@@ -2362,7 +2416,7 @@ function renderExpandableTable(tableId, title, columns, rows, opts) {
         if (typeof raw === "number" && !isNaN(raw)) cls += (raw < timeGonePct ? " pct-behind" : " pct-ahead");
       }
       const td = el("td", { class: cls }, [val == null ? "-" : String(val)]);
-      if (sx && c.key === sx.columnKey) td.appendChild(secondaryExpandButtonFor(sx, r));
+      sxList.forEach((sx) => { if (c.key === sx.columnKey) td.appendChild(secondaryExpandButtonFor(sx, r)); });
       tr.appendChild(td);
     });
     tbody.appendChild(tr);
@@ -2390,10 +2444,10 @@ function renderExpandableTable(tableId, title, columns, rows, opts) {
       tbody.appendChild(detailTr);
     }
 
-    if (sx) {
+    sxList.forEach((sx) => {
       const detailTr2 = secondaryExpandDetailRowFor(sx, r, columns.length + 1);
       if (detailTr2) tbody.appendChild(detailTr2);
-    }
+    });
   });
   table.appendChild(tbody);
   scrollWrap.appendChild(table);
@@ -3038,6 +3092,8 @@ async function fetchAndRenderAgencyFocus() {
   resetExpandable("af_promo_notsupplied");
   resetExpandable("af_outlet_notsupplied");
   resetExpandable("af_sku_notsupplied");
+  resetExpandable("af_salesman_notsupplied_outlets");
+  resetExpandable("af_salesman_notsupplied_skus");
   renderAgencyFocusPage();
 
   try {
@@ -3103,6 +3159,26 @@ function loadAgencyFocusPromoNotSuppliedOutlets(row) {
   const ctx = agencyFocusWhereAndSales();
   if (!ctx) return [];
   return buildPromoOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
+}
+
+/* Salesmen-wise table's "+" on Outlet Dist Target — outlets assigned to
+   that salesman (within the locked agency) never supplied anything yet
+   this month. */
+function loadAgencyFocusSalesmanNotSuppliedOutlets(row) {
+  const ctx = agencyFocusWhereAndSales();
+  if (!ctx) return [];
+  return buildSalesmanOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
+}
+
+/* Salesmen-wise table's "+" on SKU Dist Target — SKUs assigned to that
+   salesman (within the locked agency) never supplied anywhere yet this
+   month. */
+function loadAgencyFocusSalesmanNotSuppliedSkus(row) {
+  const ctx = agencyFocusWhereAndSales();
+  if (!ctx) return [];
+  return buildSalesmanSkuBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped)
     .then((rows) => rows.filter((r) => !r.lastSupply));
 }
 
@@ -3185,9 +3261,39 @@ function renderAgencyFocusPage() {
   }));
 
   // Salesmen-wise sits right after Promo/Regular per explicit request —
-  // before the (now unlimited) Outlets/SKUs tables, not after them.
+  // before the (now unlimited) Outlets/SKUs tables, not after them. Two
+  // independent inline "+"s here (Outlet Dist Target and SKU Dist Target
+  // each get their own), same not-supplied-this-month pattern as every
+  // other table on this page, just scoped down to one salesman.
   if (summary.bySalesman) {
-    wrap.appendChild(renderTable("af_bysales", "Salesmen-wise Performance — " + agency, SALESMAN_COLUMNS, summary.bySalesman));
+    wrap.appendChild(renderTable("af_bysales", "Salesmen-wise Performance — " + agency, SALESMAN_COLUMNS, summary.bySalesman, {
+      secondaryExpand: [
+        {
+          columnKey: "_distOutletTarget", // "Outlet Dist Target"
+          tableId: "af_salesman_notsupplied_outlets",
+          keyOf: (r) => r.label, // the salesman's name
+          loadDetail: loadAgencyFocusSalesmanNotSuppliedOutlets,
+          detailColumns: NOT_SUPPLIED_OUTLET_COLUMNS,
+          detailTitle: (r) => "Outlets not supplied this month — " + r.label + " (" + agency + ")",
+          detailRowClass: () => "row-not-supplied",
+          emptyText: "Every target outlet for this salesman has already been supplied this month.",
+          buttonTitle: "Show outlets not supplied this month by this salesman",
+          collapseTitle: "Hide not-supplied outlets",
+        },
+        {
+          columnKey: "_distSkuTarget", // "SKU Dist Target"
+          tableId: "af_salesman_notsupplied_skus",
+          keyOf: (r) => r.label, // the salesman's name
+          loadDetail: loadAgencyFocusSalesmanNotSuppliedSkus,
+          detailColumns: OUTLET_DETAIL_SKU_COLUMNS,
+          detailTitle: (r) => "SKUs not supplied this month — " + r.label + " (" + agency + ")",
+          detailRowClass: () => "row-not-supplied",
+          emptyText: "Every target SKU for this salesman has already been supplied this month.",
+          buttonTitle: "Show SKUs not supplied this month by this salesman",
+          collapseTitle: "Hide not-supplied SKUs",
+        },
+      ],
+    }));
   }
 
   // Full outlet list (not just Top 10) for this locked agency, with an
