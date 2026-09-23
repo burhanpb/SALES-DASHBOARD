@@ -349,7 +349,7 @@ const USERS = [
   { username: "Abdul Khader",   password: "375", title: "MANAGER",   manager: "KALYAN" },
   { username: "Navas",          password: "381", title: "MANAGER",   manager: "KALYAN" },
   { username: "KALYAN",         password: "201", title: "GM",        manager: "KALYAN" },
-  { username: "ANSAR ALI",      password: "376", title: "BDM",       manager: "KALYAN" },
+  { username: "ANSAR AHMED",    password: "376", title: "BDM",       manager: "KALYAN" },
   { username: "SUSHANT",        password: "385", title: "TME",       manager: "KALYAN" },
   { username: "JUNAID",         password: "204", title: "TME",       manager: "KALYAN" },
   { username: "HAYAT",          password: "202", title: "TME",       manager: "KALYAN" },
@@ -704,6 +704,43 @@ function runGvizQuery(sheetId, gql, attempt) {
   });
 }
 
+/* Memoizes identical (sheetId, gql) queries for the life of the page. A
+   query string already fully encodes what's being asked — the WHERE
+   clause bakes in the logged-in user's role scope AND every active
+   filter — so two identical query strings are guaranteed to want the
+   identical answer. Caching them means re-visiting an already-seen page,
+   or re-applying a filter/agency combo already used this session, costs
+   ZERO network round-trips instead of re-querying Google Sheets from
+   scratch — this is the biggest lever for "switching pages/filters feels
+   slow" without touching the deliberately-capped concurrency (see
+   runLimited's note above: raising that caused real timeouts before) or
+   attempting to download the whole TARGET sheet client-side (see the
+   "Request timed out" note in section 4 above — already tried, already
+   failed on a real phone for large scopes).
+   Caches the in-flight PROMISE, not just the resolved value, so two "+"
+   buttons clicked back-to-back for the same breakdown share one request
+   instead of firing two identical ones. A failed query is evicted from
+   the cache (not memoized) so a later attempt — after connectivity comes
+   back, say — can retry fresh instead of being stuck repeating an old
+   error forever. Different month = different sheetId = naturally
+   separate cache entries; different user = different username baked into
+   the WHERE clause = naturally separate cache entries too. Cleared on
+   logout purely for memory hygiene over a long-lived tab, not correctness. */
+const _gvizQueryCache = new Map(); // "sheetId\u0000gql" -> Promise<DataTable-like>
+function runGvizQueryCached(sheetId, gql) {
+  const key = sheetId + "\u0000" + gql;
+  if (_gvizQueryCache.has(key)) return _gvizQueryCache.get(key);
+  const p = runGvizQuery(sheetId, gql).catch((err) => {
+    _gvizQueryCache.delete(key); // don't memoize a failure — let the next attempt actually retry
+    throw err;
+  });
+  _gvizQueryCache.set(key, p);
+  return p;
+}
+function clearGvizQueryCache() {
+  _gvizQueryCache.clear();
+}
+
 /* Escape a value for use inside a single-quoted GQL string literal. */
 function escGQL(v) {
   return String(v == null ? "" : v).replace(/'/g, "''");
@@ -715,7 +752,7 @@ function escGQL(v) {
 const _colMapCache = {};
 function resolveColumnMap(sheetId) {
   if (_colMapCache[sheetId]) return Promise.resolve(_colMapCache[sheetId]);
-  return runGvizQuery(sheetId, "select * limit 1").then((dt) => {
+  return runGvizQueryCached(sheetId, "select * limit 1").then((dt) => {
     const map = {};
     for (let c = 0; c < dt.getNumberOfColumns(); c++) {
       map[normKey(dt.getColumnLabel(c))] = dt.getColumnId(c);
@@ -739,7 +776,7 @@ function colId(map, candidates) {
 
 function fetchSheetRows(sheetId, gqlWhere) {
   const q = "select *" + (gqlWhere ? " where " + gqlWhere : "");
-  return runGvizQuery(sheetId, q).then(dataTableToRows);
+  return runGvizQueryCached(sheetId, q).then(dataTableToRows);
 }
 
 function dataTableToRows(dt) {
@@ -1087,7 +1124,7 @@ function targetOverallAgg(sheetId, colMap, whereClause) {
   const salesId = colId(colMap, ["Sales"]);
   const w = andJoin(whereClause, `${salesId} > 0`);
   const q = `select sum(${salesId}), count(${salesId})${whereSuffix(w)}`;
-  return runGvizQuery(sheetId, q).then((dt) => {
+  return runGvizQueryCached(sheetId, q).then((dt) => {
     if (!dt.getNumberOfRows()) return { target: 0, distTarget: 0 };
     return { target: dt.getValue(0, 0) || 0, distTarget: dt.getValue(0, 1) || 0 };
   });
@@ -1104,7 +1141,7 @@ function targetGroupSum(sheetId, colMap, groupField, whereClause, opts) {
   const w = andJoin(whereClause, `${salesId} > 0`);
   let q = `select ${gId}, sum(${salesId})${whereSuffix(w)} group by ${gId} order by sum(${salesId}) desc`;
   if (opts.limit) q += ` limit ${opts.limit}`;
-  return runGvizQuery(sheetId, q).then((dt) => {
+  return runGvizQueryCached(sheetId, q).then((dt) => {
     const map = new Map();
     for (let r = 0; r < dt.getNumberOfRows(); r++) {
       map.set(String(dt.getValue(r, 0)), { target: dt.getValue(r, 1) || 0 });
@@ -1131,7 +1168,7 @@ function targetGroupSumWithLabel(sheetId, colMap, groupField, labelField, whereC
   const w = andJoin(whereClause, `${salesId} > 0`);
   let q = `select ${gId}, ${lId}, sum(${salesId})${whereSuffix(w)} group by ${gId}, ${lId} order by sum(${salesId}) desc`;
   if (opts.limit) q += ` limit ${opts.limit}`;
-  return runGvizQuery(sheetId, q).then((dt) => {
+  return runGvizQueryCached(sheetId, q).then((dt) => {
     const map = new Map();
     for (let r = 0; r < dt.getNumberOfRows(); r++) {
       const key = String(dt.getValue(r, 0));
@@ -1157,7 +1194,7 @@ function targetDistinctSecondary(sheetId, colMap, primaryField, secondaryField, 
   // all (CANNOT_GROUP_WITHOUT_AGG) even when every selected column is a
   // group key — so a harmless count(...) is added and simply ignored.
   const q = `select ${pId}, ${sId}, count(${sId})${whereSuffix(w)} group by ${pId}, ${sId}`;
-  return runGvizQuery(sheetId, q).then((dt) => {
+  return runGvizQueryCached(sheetId, q).then((dt) => {
     const map = new Map();
     for (let r = 0; r < dt.getNumberOfRows(); r++) {
       const k = String(dt.getValue(r, 0));
@@ -1178,7 +1215,7 @@ function targetDistinctPairCount(sheetId, colMap, field1, field2, whereClause) {
   const salesId = colId(colMap, ["Sales"]);
   const w = andJoin(whereClause, `${salesId} > 0`);
   const q = `select ${id1}, ${id2}, count(${id2})${whereSuffix(w)} group by ${id1}, ${id2}`; // see note above re: CANNOT_GROUP_WITHOUT_AGG
-  return runGvizQuery(sheetId, q).then((dt) => dt.getNumberOfRows());
+  return runGvizQueryCached(sheetId, q).then((dt) => dt.getNumberOfRows());
 }
 
 /* Count of distinct values of a single column within a WHERE scope
@@ -1194,7 +1231,7 @@ function targetDistinctCount(sheetId, colMap, field, whereClause) {
   const salesId = colId(colMap, ["Sales"]);
   const w = andJoin(whereClause, `${salesId} > 0`);
   const q = `select ${id}, count(${id})${whereSuffix(w)} group by ${id}`; // see note above re: CANNOT_GROUP_WITHOUT_AGG
-  return runGvizQuery(sheetId, q).then((dt) => dt.getNumberOfRows());
+  return runGvizQueryCached(sheetId, q).then((dt) => dt.getNumberOfRows());
 }
 
 /* Distinct values of one column within a WHERE scope — used to populate
@@ -1202,7 +1239,7 @@ function targetDistinctCount(sheetId, colMap, field, whereClause) {
 function targetDistinctValues(sheetId, colMap, field, whereClause) {
   const id = colId(colMap, [field]);
   const q = `select ${id}, count(${id})${whereSuffix(whereClause)} group by ${id} order by ${id}`; // see note above re: CANNOT_GROUP_WITHOUT_AGG
-  return runGvizQuery(sheetId, q).then((dt) => {
+  return runGvizQueryCached(sheetId, q).then((dt) => {
     const vals = [];
     for (let r = 0; r < dt.getNumberOfRows(); r++) {
       const v = dt.getValue(r, 0);
@@ -1799,15 +1836,31 @@ function renderLogin(errorMsg) {
   const root = $("#root");
   root.innerHTML = "";
 
+  // Login-dropdown display grouping ONLY — purely cosmetic, per explicit
+  // request. This does NOT touch the actual permission system: KALYAN
+  // stays title "GM", ANSAR AHMED stays "BDM", HAYAT/JUNAID/SUSHANT/
+  // AFEEF/BURHAN stay "TME" (see FULL_ACCESS_TITLES and buildGqlWhere) —
+  // only which heading each name is LISTED under in the login screen
+  // changes. Explicit username lists (not title-based filtering) because
+  // "Managers" here mixes two different underlying titles (MANAGER, plus
+  // KALYAN/ANSAR AHMED who are GM/BDM) and "Leadership" no longer exists
+  // as a heading at all — managers were seeing themselves grouped under
+  // "Leadership" instead of "Managers", which read wrong to them even
+  // though access-wise nothing was incorrect.
   const salesmen = USERS.filter((u) => u.title === "SALES MEN");
-  const managers = USERS.filter((u) => u.title === "MANAGER");
-  const leadership = USERS.filter((u) => FULL_ACCESS_TITLES.includes(u.title));
+  const managerDisplayNames = ["Jinu", "Danish", "Abdul Khader", "Navas", "KALYAN", "ANSAR AHMED"];
+  const tmTeamDisplayNames = ["HAYAT", "JUNAID", "SUSHANT"];
+  const coordinatorDisplayNames = ["BURHAN", "AFEEF"];
+  const managers = USERS.filter((u) => managerDisplayNames.includes(u.username));
+  const tmTeam = USERS.filter((u) => tmTeamDisplayNames.includes(u.username));
+  const coordinators = USERS.filter((u) => coordinatorDisplayNames.includes(u.username));
 
   const select = el("select", { id: "loginUser", class: "input" }, [
     el("option", { value: "" }, ["Select your name..."]),
     el("optgroup", { label: "Salesmen" }, salesmen.map((u) => el("option", { value: u.username }, [u.username]))),
     el("optgroup", { label: "Managers" }, managers.map((u) => el("option", { value: u.username }, [u.username]))),
-    el("optgroup", { label: "Leadership" }, leadership.map((u) => el("option", { value: u.username }, [u.username]))),
+    el("optgroup", { label: "TM Team" }, tmTeam.map((u) => el("option", { value: u.username }, [u.username]))),
+    el("optgroup", { label: "Coordinator" }, coordinators.map((u) => el("option", { value: u.username }, [u.username]))),
   ]);
   const pass = el("input", { id: "loginPass", class: "input", type: "password", placeholder: "Password", inputmode: "numeric" });
 
@@ -1862,6 +1915,7 @@ function logout() {
   resetExpandable("af_sku_notsupplied");
   resetExpandable("af_salesman_notsupplied_outlets");
   resetExpandable("af_salesman_notsupplied_skus");
+  clearGvizQueryCache(); // memory hygiene only — see its own comment for why this is never needed for correctness
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
   renderLogin();
 }
