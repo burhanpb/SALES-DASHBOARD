@@ -1370,11 +1370,26 @@ async function buildAgencyFocusData(targetSheetId, targetColMap, whereBase, agen
   const agencyId = colId(targetColMap, ["Agency"]);
   const whereT = andJoin(whereBase, eqAny(agencyId, [agencyName]));
   const scopedSalesRows = salesRowsScoped.filter((r) => r.agency === agencyName);
-  const [summary, outlets, skus] = await Promise.all([
-    buildSummaryData(targetSheetId, targetColMap, whereT, scopedSalesRows, user),
-    buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, scopedSalesRows),
-    buildSkusData(targetSheetId, targetColMap, whereT, scopedSalesRows),
-  ]);
+  // Deliberately SEQUENTIAL, not Promise.all. Each of these three builders
+  // is already its own multi-query call tree (buildSummaryData alone fires
+  // ~13 queries across several internally-batched stages) — for a
+  // full-access TME this runs against the WHOLE company's slice of a
+  // 200,000+ row TARGET sheet, just restricted to one Agency. Running all
+  // three trees at once (as this used to, via Promise.all) piles their
+  // queries on top of each other with no shared throttling, well past the
+  // handful of concurrent connections a browser keeps open to one host —
+  // this is exactly the "many queries racing the same host" scenario
+  // runLimited (above, in loadMonth) was written to avoid, just not
+  // covered by it since this page's queries fire long after loadMonth has
+  // finished. The pile-up was confirmed as the real cause of Agency Focus
+  // being uniquely slow — and eventually failing outright once enough
+  // queries in the pile hit their 20s timeout — for every user who can
+  // reach this page (Sushant/Junaid/Hayat), while every other page (one
+  // query tree at a time) loads fine for everyone else. Awaiting each tree
+  // in turn costs some wall-clock time but each one completes reliably.
+  const summary = await buildSummaryData(targetSheetId, targetColMap, whereT, scopedSalesRows, user);
+  const outlets = await buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, scopedSalesRows);
+  const skus = await buildSkusData(targetSheetId, targetColMap, whereT, scopedSalesRows);
   // Unlike the whole-company Summary page (Top 10 Customers / Top 20
   // SKUs), Agency Focus shows the FULL outlet/SKU list for this one
   // locked agency — the same unlimited builders the Outlets/0 Billing
@@ -1528,14 +1543,17 @@ async function buildPromoOutletBreakdown(targetSheetId, targetColMap, whereBase,
   }).sort((x, y) => y.target - x.target);
 }
 
-/* Agency Focus page's own outlet list — reuses buildOutletsData wholesale
-   (unlimited, same as the main Outlets page) then attaches which salesman
-   ("Collector") covers each outlet, pulled from the TARGET sheet the same
-   way the outlet's own name is (one extra small query, fired in parallel).
-   Assumes one salesman per outlet within this one locked agency, same
-   "one label per group" assumption targetGroupSumWithLabel already makes
-   for the outlet's own name. */
-async function buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+/* Generic "outlet list + which salesman (Collector) covers each outlet"
+   builder — reuses buildOutletsData wholesale (unlimited, same as the main
+   Outlets page) then attaches each outlet's salesman, pulled from the
+   TARGET sheet the same way the outlet's own name is (one extra small
+   query, fired in parallel). Assumes one salesman per outlet within the
+   given scope, same "one label per group" assumption targetGroupSumWithLabel
+   already makes for the outlet's own name. Used anywhere a manager/TME/
+   Coordinator-tier user is looking at a full outlet list and needs to know
+   whose outlet each row is — a plain salesman login never needs this (they
+   only ever see their own outlets), so callers only fetch it for that tier. */
+async function buildOutletsDataWithSalesman(targetSheetId, targetColMap, whereT, salesRowsScoped) {
   const [outletsResult, salesmanMap] = await Promise.all([
     buildOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped),
     targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Collector", whereT, {}),
@@ -1545,6 +1563,14 @@ async function buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, 
     row.salesman = info ? info.label : "";
   });
   return outletsResult;
+}
+
+/* Agency Focus page's own outlet list — kept as its own name (tests and
+   call sites already reference it directly) but now just the generic
+   salesman-attaching builder above, scoped to one agency like every other
+   Agency Focus table. */
+async function buildAgencyFocusOutletsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+  return buildOutletsDataWithSalesman(targetSheetId, targetColMap, whereT, salesRowsScoped);
 }
 
 /* On-demand "every target-bearing OUTLET for one salesman (Collector),
@@ -1628,6 +1654,11 @@ function groupSalesRowsBy(rows, field, labelField) {
       return: returnDisplaySum(rs),
       outlets: new Set(rs.map((r) => r.custCode)).size,
       skus: new Set(rs.map((r) => r.itemCode)).size,
+      // Only meaningful when grouping BY outlet (one outlet = one assigned
+      // salesman, same assumption the TARGET-side builders make elsewhere)
+      // — harmless and simply unused when grouping by agency/SKU, where a
+      // group can span many salesmen.
+      salesman: (rs[0] && rs[0].collector) || "",
     });
   });
   return out.sort((a, b) => b.net - a.net);
@@ -1916,6 +1947,9 @@ function logout() {
   resetExpandable("af_sku_notsupplied");
   resetExpandable("af_salesman_notsupplied_outlets");
   resetExpandable("af_salesman_notsupplied_skus");
+  resetExpandable("zb_sku_notsupplied");
+  resetExpandable("y_agency");
+  resetExpandable("y_sku");
   clearGvizQueryCache(); // memory hygiene only — see its own comment for why this is never needed for correctness
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
   renderLogin();
@@ -3029,13 +3063,21 @@ async function fetchAndRenderZeroBilling() {
   const reqId = ++state._contentReqId;
   zeroBillingLoading = true;
   zeroBillingError = null;
+  resetExpandable("zb_sku_notsupplied"); // a real refetch invalidates any "+"-expanded breakdowns
   renderZeroBillingPage();
 
   try {
     const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
     const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    // A plain salesman login only ever sees their own outlets (whose they
+    // are is never in question), so skip the extra Collector lookup query
+    // for that tier — only fetch/show it for manager/TME/Coordinator tier,
+    // who are looking at their whole team's outlet list at once.
+    const isManagerTier = state.user.title !== "SALES MEN";
     const [outlets, skus] = await Promise.all([
-      buildOutletsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped),
+      isManagerTier
+        ? buildOutletsDataWithSalesman(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped)
+        : buildOutletsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped),
       buildSkusData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped),
     ]);
     if (reqId !== state._contentReqId) return; // a newer request superseded this one
@@ -3050,14 +3092,47 @@ async function fetchAndRenderZeroBilling() {
   renderZeroBillingPage();
 }
 
-const ZERO_OUTLET_COLUMNS = [
+const ZERO_OUTLET_COLUMNS_BASE = [
   { key: "label", label: "Outlet" },
   { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
 ];
+// Manager/TME/Coordinator tier only — a plain salesman already only ever
+// sees their own outlets, so there's no "whose outlet is this" question
+// for them, and the column (and its extra query) is skipped entirely.
+function zeroOutletColumns() {
+  if (state.user.title === "SALES MEN") return ZERO_OUTLET_COLUMNS_BASE;
+  const cols = ZERO_OUTLET_COLUMNS_BASE.slice();
+  cols.splice(1, 0, { key: "salesman", label: "Salesman" });
+  return cols;
+}
 const ZERO_SKU_COLUMNS = [
   { key: "label", label: "SKU" },
   { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "distTarget", label: "Dist Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
 ];
+
+/* Rebuilds the exact same role+filter WHERE clause / sales-row slice the
+   0 Billing page itself just fetched with, at the moment a "+" button is
+   actually clicked (never prefetched) — same pattern as
+   agencyFocusWhereAndSales(), just with no agency lock. */
+function zeroBillingWhereAndSales() {
+  const cached = state.cache[state.month];
+  if (!cached) return null;
+  const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+  const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+  return { cached, whereT, salesRowsScoped };
+}
+
+/* 0-Billed SKUs table's "+" (Dist Target) — every outlet that carries a
+   target for this SKU but hasn't been supplied it yet this month, each
+   with its own target value (reuses the same breakdown builder the Agency
+   Focus SKU table's "+" already uses). */
+function loadZeroBillingSkuNotSuppliedOutlets(row) {
+  const ctx = zeroBillingWhereAndSales();
+  if (!ctx) return [];
+  return buildSkuOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._itemCode, ctx.salesRowsScoped)
+    .then((rows) => rows.filter((r) => !r.lastSupply));
+}
 
 function renderZeroBillingPage() {
   const content = $("#content");
@@ -3099,8 +3174,21 @@ function renderZeroBillingPage() {
   ])));
   wrap.appendChild(kpi);
 
-  wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no sales this month (a return-driven negative counts as 0-billed too)", ZERO_OUTLET_COLUMNS, z.outlets));
-  wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but not sold at any outlet this month", ZERO_SKU_COLUMNS, z.skus));
+  wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no sales this month (a return-driven negative counts as 0-billed too)", zeroOutletColumns(), z.outlets));
+  wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but not sold at any outlet this month", ZERO_SKU_COLUMNS, z.skus, {
+    secondaryExpand: {
+      columnKey: "distTarget", // "Dist Target" on this table
+      tableId: "zb_sku_notsupplied",
+      keyOf: (r) => r._itemCode,
+      loadDetail: loadZeroBillingSkuNotSuppliedOutlets,
+      detailColumns: NOT_SUPPLIED_OUTLET_COLUMNS,
+      detailTitle: (r) => "Outlets with a target for " + r.label + " not supplied this month",
+      detailRowClass: () => "row-not-supplied",
+      emptyText: "No outlet carries a target for this SKU.",
+      buttonTitle: "Show outlets that have a target for this SKU",
+      collapseTitle: "Hide outlet list",
+    },
+  }));
 
   content.appendChild(renderPageDownloadToolbar("0 Billing — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(wrap);
@@ -3418,7 +3506,9 @@ async function fetchAndRenderYesterday() {
   if (!content) return;
   const y = computeYesterdayKey();
   state.pageYesterday = { loading: true, error: null, data: state.pageYesterday ? state.pageYesterday.data : null, dateLabel: y.label };
-  resetExpandable("y_outlet"); // a real refetch invalidates any "+"-expanded SKU breakdowns
+  resetExpandable("y_outlet"); // a real refetch invalidates any "+"-expanded breakdowns
+  resetExpandable("y_agency");
+  resetExpandable("y_sku");
   renderYesterdayPage();
 
   if (!MONTHS.find((m) => m.key === y.monthKey)) {
@@ -3447,6 +3537,18 @@ const YESTERDAY_COLUMNS_BASE = [
 function yesterdayColumnsWithLabel(labelHeader) {
   const cols = YESTERDAY_COLUMNS_BASE.map((c) => Object.assign({}, c));
   cols[0] = { key: "label", label: labelHeader };
+  return cols;
+}
+// Outlet-wise table only — each row's own "salesman" field (set by
+// groupSalesRowsBy from the row's Collector) only makes sense when the
+// grouping dimension IS the outlet; an Agency/SKU row can span many
+// salesmen, so this column is never added to those tables. Manager/TME/
+// Coordinator tier only, same reasoning as zeroOutletColumns() — a plain
+// salesman login only ever sees their own outlets.
+function yesterdayOutletColumns() {
+  const cols = yesterdayColumnsWithLabel("Outlet");
+  if (state.user.title === "SALES MEN") return cols;
+  cols.splice(1, 0, { key: "salesman", label: "Salesman" });
   return cols;
 }
 
@@ -3485,7 +3587,7 @@ function renderYesterdayPage() {
   wrap.appendChild(renderExpandableTable(
     "y_outlet",
     "Outlet-wise Sales — " + label + ". Click + on a row for its SKU-wise breakdown.",
-    yesterdayColumnsWithLabel("Outlet"),
+    yesterdayOutletColumns(),
     d.byOutlet,
     {
       keyOf: (r) => r._key,
@@ -3494,8 +3596,30 @@ function renderYesterdayPage() {
       detailTitle: (r) => "SKU-wise sales at " + r.label,
     }
   ));
-  wrap.appendChild(renderTable("y_agency", "Agency-wise Sales — " + label, yesterdayColumnsWithLabel("Agency"), d.byAgency));
-  wrap.appendChild(renderTable("y_sku", "SKU-wise Sales — " + label, yesterdayColumnsWithLabel("SKU"), d.bySku));
+  wrap.appendChild(renderExpandableTable(
+    "y_agency",
+    "Agency-wise Sales — " + label + ". Click + on a row for its SKU-wise breakdown.",
+    yesterdayColumnsWithLabel("Agency"),
+    d.byAgency,
+    {
+      keyOf: (r) => r._key,
+      loadDetail: (row) => loadYesterdayAgencySkuDetail(row),
+      detailColumns: YESTERDAY_DETAIL_COLUMNS,
+      detailTitle: (r) => "SKU-wise sales under " + r.label,
+    }
+  ));
+  wrap.appendChild(renderExpandableTable(
+    "y_sku",
+    "SKU-wise Sales — " + label + ". Click + on a row for its outlet-wise breakdown.",
+    yesterdayColumnsWithLabel("SKU"),
+    d.bySku,
+    {
+      keyOf: (r) => r._key,
+      loadDetail: (row) => loadYesterdaySkuOutletDetail(row),
+      detailColumns: YESTERDAY_DETAIL_OUTLET_COLUMNS,
+      detailTitle: (r) => "Outlet-wise sales for " + r.label,
+    }
+  ));
 
   content.appendChild(renderPageDownloadToolbar("Yesterdays Sales — " + label));
   content.appendChild(wrap);
@@ -3506,12 +3630,36 @@ const YESTERDAY_DETAIL_COLUMNS = [
   { key: "net", label: "Sales", numeric: true, fmt: (v) => fmtNum(v, 0) },
   { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
 ];
+const YESTERDAY_DETAIL_OUTLET_COLUMNS = [
+  { key: "label", label: "Outlet" },
+  { key: "net", label: "Sales", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+];
 
 function loadYesterdayOutletSkuDetail(row) {
   const py = state.pageYesterday;
   const dayRows = (py && py.data && py.data.dayRows) || [];
   const scoped = dayRows.filter((r) => r.custCode === row._key);
   return groupSalesRowsBy(scoped, "itemCode", "itemDesc"); // synchronous — no query needed, data's already local
+}
+
+/* Agency-wise table's "+" — every SKU sold under that one agency
+   yesterday. Same purely-client-side pattern as the outlet breakdown
+   above (the whole day's rows are already local, no network call). */
+function loadYesterdayAgencySkuDetail(row) {
+  const py = state.pageYesterday;
+  const dayRows = (py && py.data && py.data.dayRows) || [];
+  const scoped = dayRows.filter((r) => r.agency === row._key);
+  return groupSalesRowsBy(scoped, "itemCode", "itemDesc");
+}
+
+/* SKU-wise table's "+" — every outlet that SKU was supplied at
+   yesterday. */
+function loadYesterdaySkuOutletDetail(row) {
+  const py = state.pageYesterday;
+  const dayRows = (py && py.data && py.data.dayRows) || [];
+  const scoped = dayRows.filter((r) => r.itemCode === row._key);
+  return groupSalesRowsBy(scoped, "custCode", "custSite");
 }
 
 /* ---------------------------------------------------------------------
