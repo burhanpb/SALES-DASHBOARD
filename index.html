@@ -199,6 +199,14 @@ tr.detail-row td.detail-cell { background: var(--detail-bg); padding: 10px 10px 
 tr.detail-row .table-card { box-shadow: none; border: 1px solid var(--border); margin: 0; }
 .loading-block-inline { padding: 8px 4px; font-size: 12px; color: var(--text-muted); }
 
+/* Returns page — one collapsible section per top-level table (Salesmen/
+   Agency/Outlet/SKU-wise), each independently expandable so a long
+   Outlet/SKU-wise table doesn't force scrolling past the others. Collapsed
+   shows only the table's name as a full-width clickable bar. */
+.ret-section { margin-bottom: 14px; }
+.section-toggle-btn { width: 100%; text-align: left; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); border-radius: 8px; padding: 10px 14px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.section-toggle-btn:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
 /* Outlet Details page — outlet picker */
 .outlet-selector { padding: 12px 16px; background: var(--card-bg); border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 4px; max-width: 420px; }
 .outlet-selector .field-label { margin: 0; }
@@ -1717,20 +1725,175 @@ async function buildSkusData(targetSheetId, targetColMap, whereT, salesRowsScope
 }
 
 /* Pure client-side filter of two already-fetched (full, unlimited)
-   outlet/SKU lists down to the "0 billing" condition: target > 0 and
-   net <= 0. Using <= 0 (not === 0) deliberately covers the outlet case
-   explicitly called out — a return against an earlier month's purchase
-   can push net negative with zero real sales this month, and that
-   outlet should still show up here, not be hidden by a stricter ===0 check. */
+   outlet/SKU lists down to the "0 billing" condition: target > 0 and no
+   real purchase at all this month (r.lastSupply is null/undefined — the
+   same "ever supplied" signal the rest of the app already uses for its
+   "not supplied" breakdowns, see mergeRow's lastSupply field).
+
+   IMPORTANT — this used to be "net <= 0" (the outlet/SKU's TOTAL net
+   across every agency/row in scope), which wrongly flagged an outlet as
+   0-billed whenever returns in ONE agency outweighed a genuine purchase
+   in ANOTHER agency at that same outlet — e.g. a real 23 OMR sale under
+   LESAFFRE could still show the whole outlet as "0-billed" if DELICIO
+   and TWININGS booked bigger returns there the same month, even though
+   that outlet plainly WAS billed. Confirmed wrong against a real case
+   (19308100-FRESH SONS, Oct 2026) and changed per explicit instruction:
+   an outlet/SKU only counts as 0-billed now if NO purchase-type activity
+   happened anywhere in scope this month — a pure return-only month still
+   correctly counts (lastSupply stays null, since splitSalesRows excludes
+   RETURN-type rows from it), but any real purchase, anywhere, excludes
+   it, regardless of what the net total ends up being. */
 function buildZeroBillingData(outletsRows, skuRows) {
-  const zeroOutlets = outletsRows.filter((r) => r.target > 0 && r.net <= 0);
-  const zeroSkus = skuRows.filter((r) => r.target > 0 && r.net <= 0);
+  const zeroOutlets = outletsRows.filter((r) => r.target > 0 && !r.lastSupply);
+  const zeroSkus = skuRows.filter((r) => r.target > 0 && !r.lastSupply);
   return {
     outlets: zeroOutlets,
     outletsTotalTarget: sum(zeroOutlets, "target"),
     skus: zeroSkus,
     skusTotalTarget: sum(zeroSkus, "target"),
   };
+}
+
+/* ---------------------------------------------------------------------
+   13. RETURNS PAGE DATA BUILDERS
+
+   A dedicated page showing WHERE return value is coming from, sliced
+   four ways (Agency / Outlet / Salesman / SKU), each able to drill into
+   one or more other dimensions on demand via a "+" button — e.g. "this
+   agency's returns are driven by which SKUs" or "this SKU's returns are
+   coming from which outlets". Every Return figure here is the sheet's
+   own dedicated "Return Val" column only (returnDisplaySum — the exact
+   same helper every other page already uses to DISPLAY a Return
+   figure), never inferred from net achievement.
+
+   Two extra per-row metrics, added by withReturnMetrics() below and
+   used nowhere else in the app (per explicit instruction):
+     - returnPct = Return ÷ Net Achievement, ×100. Net Achievement nets
+       purchases and returns together, so this can look unusually large
+       (or swing negative) when returns are big relative to a small or
+       negative net — an accepted tradeoff of this specific definition,
+       not a bug.
+     - contributionPct = this row's Return ÷ the TOTAL Return across
+       every row in the SAME array being rendered. For a top-level table
+       (Agency-wise/Outlet-wise/Salesman-wise/SKU-wise) that total is the
+       grand total Return across the whole current scope; for a
+       drill-down breakdown (e.g. the SKUs under one Agency) it's that
+       one parent's own total Return — i.e. "what % of THIS agency's
+       returns does this SKU account for," not company-wide. This is
+       exactly what makes withReturnMetrics() reusable unchanged for
+       both top-level tables and every drill-down breakdown below: the
+       denominator is always just "sum of .return over the array handed
+       to it."
+   --------------------------------------------------------------------- */
+function withReturnMetrics(rows) {
+  const totalReturn = sum(rows, "return");
+  return rows.map((r) => Object.assign({}, r, {
+    returnPct: r.net !== 0 ? (r.return / r.net) * 100 : (r.return > 0 ? 100 : 0),
+    contributionPct: totalReturn > 0 ? (r.return / totalReturn) * 100 : 0,
+  }));
+}
+
+/* Top-level Agency-wise returns list — every agency in scope (not just
+   ones with a return), sorted by Return descending by the caller. No
+   distribution columns on this page, so (unlike buildSummaryData's
+   out.byAgency) this skips the extra targetDistinctSecondary query
+   entirely — one query instead of two. */
+async function buildAgencyReturnsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+  const agencySumMap = await targetGroupSum(targetSheetId, targetColMap, "Agency", whereT);
+  const sByAgency = groupBy(salesRowsScoped, "agency");
+  const agencyKeys = new Set([...agencySumMap.keys(), ...sByAgency.keys()]);
+  const rows = [...agencyKeys].filter(Boolean).map((a) =>
+    mergeRow(a, { target: (agencySumMap.get(a) || {}).target || 0, distTarget: 0 }, sByAgency.get(a) || [], KEY_OUTLET)
+  );
+  return withReturnMetrics(rows).sort((x, y) => y.return - x.return);
+}
+
+/* Top-level Salesman-wise returns list — Manager/GM/BDM/TME tier only
+   (gated in the UI layer, same condition buildSummaryData's bySalesman
+   table already uses: user.title === "MANAGER" || FULL_ACCESS_TITLES).
+   Same "no distribution query" simplification as buildAgencyReturnsData. */
+async function buildSalesmanReturnsData(targetSheetId, targetColMap, whereT, salesRowsScoped) {
+  const salesmanSumMap = await targetGroupSum(targetSheetId, targetColMap, "Collector", whereT);
+  const sBySales = groupBy(salesRowsScoped, "collector");
+  const salesmenKeys = new Set([...salesmanSumMap.keys(), ...sBySales.keys()]);
+  const rows = [...salesmenKeys].filter(Boolean).map((sName) =>
+    mergeRow(sName, { target: (salesmanSumMap.get(sName) || {}).target || 0, distTarget: 0 }, sBySales.get(sName) || [], KEY_OUTLET)
+  );
+  return withReturnMetrics(rows).sort((x, y) => y.return - x.return);
+}
+
+/* Outlet-wise and SKU-wise top-level lists reuse the existing unlimited
+   buildOutletsData/buildSkusData builders wholesale (the exact same ones
+   the "All Customers/Outlets" and Agency Focus pages already use) — they
+   already carry _custCode/_itemCode for the drill-down buttons below.
+   fetchAndRenderReturns just re-sorts their rows by Return and layers the
+   two % metrics on top via withReturnMetrics; no new builder needed. */
+
+/* --- Drill-downs for the Agency-wise table: Agency -> SKU, Agency ->
+   Outlet, each across every outlet/SKU under that one agency. --- */
+async function buildAgencySkuBreakdown(targetSheetId, targetColMap, whereBase, agencyName, salesRowsScoped) {
+  const agencyId = colId(targetColMap, ["Agency"]);
+  const scopedWhere = andJoin(whereBase, eqAny(agencyId, [agencyName]));
+  const skuSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Item Code", "Item Desc", scopedWhere, {});
+  const agencySalesRows = salesRowsScoped.filter((r) => r.agency === agencyName);
+  const sBySku = groupBy(agencySalesRows, "itemCode");
+  const skuKeys = new Set([...skuSumMap.keys(), ...sBySku.keys()]);
+  const rows = [...skuKeys].filter(Boolean).map((code) => {
+    const info = skuSumMap.get(code);
+    const slice = sBySku.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].itemDesc) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_OUTLET);
+  });
+  return withReturnMetrics(rows).sort((x, y) => y.return - x.return);
+}
+
+async function buildAgencyOutletBreakdown(targetSheetId, targetColMap, whereBase, agencyName, salesRowsScoped) {
+  const agencyId = colId(targetColMap, ["Agency"]);
+  const scopedWhere = andJoin(whereBase, eqAny(agencyId, [agencyName]));
+  const custSumMap = await targetGroupSumWithLabel(targetSheetId, targetColMap, "Cust Site Code", "Cust Site", scopedWhere, {});
+  const agencySalesRows = salesRowsScoped.filter((r) => r.agency === agencyName);
+  const sByCust = groupBy(agencySalesRows, "custCode");
+  const custKeys = new Set([...custSumMap.keys(), ...sByCust.keys()]);
+  const rows = [...custKeys].filter(Boolean).map((code) => {
+    const info = custSumMap.get(code);
+    const slice = sByCust.get(code) || [];
+    const label = info ? info.label : ((slice[0] && slice[0].custSite) || code);
+    return mergeRow(label, { target: info ? info.target : 0, distTarget: 0 }, slice, KEY_SKU);
+  });
+  return withReturnMetrics(rows).sort((x, y) => y.return - x.return);
+}
+
+/* --- Drill-down for the Salesmen-wise table's 1st button: Salesman ->
+   Agency. (That table's 2nd/3rd buttons reuse the existing
+   buildSalesmanSkuBreakdown/buildSalesmanOutletBreakdown as-is — see
+   the Returns page UI section below.) --- */
+async function buildSalesmanAgencyBreakdown(targetSheetId, targetColMap, whereBase, salesmanName, salesRowsScoped) {
+  const collectorId = colId(targetColMap, ["Collector"]);
+  const scopedWhere = andJoin(whereBase, eqAny(collectorId, [salesmanName]));
+  const agencySumMap = await targetGroupSum(targetSheetId, targetColMap, "Agency", scopedWhere);
+  const salesmanSalesRows = salesRowsScoped.filter((r) => r.collector === salesmanName);
+  const sByAgency = groupBy(salesmanSalesRows, "agency");
+  const agencyKeys = new Set([...agencySumMap.keys(), ...sByAgency.keys()]);
+  const rows = [...agencyKeys].filter(Boolean).map((a) =>
+    mergeRow(a, { target: (agencySumMap.get(a) || {}).target || 0, distTarget: 0 }, sByAgency.get(a) || [], KEY_SKU)
+  );
+  return withReturnMetrics(rows).sort((x, y) => y.return - x.return);
+}
+
+/* --- Drill-down for the SKU-wise table's 2nd button: SKU -> Salesman.
+   (That table's 1st button reuses the existing buildSkuOutletBreakdown
+   as-is — see the Returns page UI section below.) --- */
+async function buildSkuSalesmanBreakdown(targetSheetId, targetColMap, whereBase, itemCode, salesRowsScoped) {
+  const itemId = colId(targetColMap, ["Item Code"]);
+  const scopedWhere = andJoin(whereBase, eqAnyNumericSafe(itemId, [itemCode]));
+  const salesmanSumMap = await targetGroupSum(targetSheetId, targetColMap, "Collector", scopedWhere);
+  const skuSalesRows = salesRowsScoped.filter((r) => r.itemCode === itemCode);
+  const sBySales = groupBy(skuSalesRows, "collector");
+  const salesmenKeys = new Set([...salesmanSumMap.keys(), ...sBySales.keys()]);
+  const rows = [...salesmenKeys].filter(Boolean).map((sName) =>
+    mergeRow(sName, { target: (salesmanSumMap.get(sName) || {}).target || 0, distTarget: 0 }, sBySales.get(sName) || [], KEY_OUTLET)
+  );
+  return withReturnMetrics(rows).sort((x, y) => y.return - x.return);
 }
 
 /* ======================================================================
@@ -1936,6 +2099,7 @@ function logout() {
   currentSummary = null;
   currentOutlets = null;
   currentZeroBilling = null;
+  currentReturns = null;
   outletDetailAgencies = null;
   currentAgencyFocus = null;
   resetExpandable("alloutlets");
@@ -1950,6 +2114,16 @@ function logout() {
   resetExpandable("zb_sku_notsupplied");
   resetExpandable("y_agency");
   resetExpandable("y_sku");
+  resetExpandable("ret_agency_sku");
+  resetExpandable("ret_agency_outlet");
+  resetExpandable("ret_outlet_agency");
+  resetExpandable("ret_outlet_sku");
+  resetExpandable("ret_sku_outlet");
+  resetExpandable("ret_sku_salesman");
+  resetExpandable("ret_salesman_agency");
+  resetExpandable("ret_salesman_sku");
+  resetExpandable("ret_salesman_outlet");
+  returnsSectionOpen = { salesman: false, agency: false, outlet: false, sku: false };
   clearGvizQueryCache(); // memory hygiene only — see its own comment for why this is never needed for correctness
   state.filters = { agency: [], prodGroup: "ALL", promoReg: "ALL", salesmen: [], managers: [], custGroup: [], majorOther: "ALL", search: "" };
   renderLogin();
@@ -2046,6 +2220,10 @@ const PAGES = [
   { key: "outlets", label: "All Customers / Outlets" },
   { key: "outletdetail", label: "Outlet Details" },
   { key: "zerobilling", label: "0 Billing" },
+  // Visible to every role — the Salesmen-wise table inside it is further
+  // gated to Manager/GM/BDM/TME tier on its own (see renderReturnsPage),
+  // same way the Summary page's own Salesmen-wise table already is.
+  { key: "returns", label: "Returns" },
   // Only shown to a user with an entry in AGENCY_FOCUS_ASSIGNMENTS (currently
   // Sushant, Junaid, Hayat) — everyone else never even sees the tab exist.
   { key: "agencyfocus", label: "Agency Focus", visible: (user) => !!AGENCY_FOCUS_ASSIGNMENTS[user.username] },
@@ -2088,6 +2266,7 @@ function setPage(key) {
     if (state.pageOutletDetail.custCode && !outletDetailAgencies && !outletDetailLoading) fetchOutletDetailAgencies();
   }
   else if (key === "zerobilling") { if (currentZeroBilling) renderZeroBillingPage(); else fetchAndRenderZeroBilling(); }
+  else if (key === "returns") { if (currentReturns) renderReturnsPage(); else fetchAndRenderReturns(); }
   else if (key === "agencyfocus") {
     renderAgencyFocusPage(); // handles picking a default agency internally
     if (state.pageAgencyFocus.agency && !currentAgencyFocus && !agencyFocusLoading) fetchAndRenderAgencyFocus();
@@ -2102,6 +2281,7 @@ function rerenderCurrentPage() {
   else if (state.page === "yesterday") renderYesterdayPage();
   else if (state.page === "outletdetail") renderOutletDetailPage();
   else if (state.page === "zerobilling") renderZeroBillingPage();
+  else if (state.page === "returns") renderReturnsPage();
   else if (state.page === "agencyfocus") renderAgencyFocusPage();
   else renderSummaryTables();
 }
@@ -2641,6 +2821,7 @@ function scheduleContentRefresh() {
   currentSummary = null;
   currentOutlets = null;
   currentZeroBilling = null;
+  currentReturns = null;
   outletDetailAgencies = null; // the selected outlet's agency breakdown also depends on the active filters
   currentAgencyFocus = null; // the selected agency's breakdown also depends on the active (non-Agency) filters
   if (state._contentDebounceTimer) clearTimeout(state._contentDebounceTimer);
@@ -2648,6 +2829,7 @@ function scheduleContentRefresh() {
     if (state.page === "outlets") fetchAndRenderOutlets();
     else if (state.page === "summary") fetchAndRenderContent();
     else if (state.page === "zerobilling") fetchAndRenderZeroBilling();
+    else if (state.page === "returns") fetchAndRenderReturns();
     else if (state.page === "outletdetail" && state.pageOutletDetail.custCode) fetchOutletDetailAgencies();
     else if (state.page === "agencyfocus" && state.pageAgencyFocus.agency) fetchAndRenderAgencyFocus();
   }, 350);
@@ -2655,6 +2837,7 @@ function scheduleContentRefresh() {
   if (state.page === "outlets") { outletsLoading = true; renderOutletsPage(); }
   else if (state.page === "summary") { state.summaryLoading = true; renderSummaryTables(); }
   else if (state.page === "zerobilling") { zeroBillingLoading = true; renderZeroBillingPage(); }
+  else if (state.page === "returns") { returnsLoading = true; renderReturnsPage(); }
   else if (state.page === "outletdetail") { outletDetailLoading = true; renderOutletDetailPage(); }
   else if (state.page === "agencyfocus") { agencyFocusLoading = true; renderAgencyFocusPage(); }
 }
@@ -2737,6 +2920,7 @@ function renderContent() {
   if (state.page === "outlets") { currentOutlets = null; fetchAndRenderOutlets(); return; }
   if (state.page === "yesterday") { fetchAndRenderYesterday(); return; }
   if (state.page === "zerobilling") { currentZeroBilling = null; fetchAndRenderZeroBilling(); return; }
+  if (state.page === "returns") { currentReturns = null; fetchAndRenderReturns(); return; }
   if (state.page === "outletdetail") {
     currentOutlets = null;
     outletDetailAgencies = null;
@@ -3044,9 +3228,11 @@ const NOT_SUPPLIED_OUTLET_COLUMNS = [
 ];
 
 /* ---------------------------------------------------------------------
-   0 BILLING PAGE — outlets that carry a target but no real sales this
-   month (net <= 0, so a return-driven negative counts too), and SKUs
-   that carry a target but weren't sold at any of this user's outlets
+   0 BILLING PAGE — outlets that carry a target but had no real purchase
+   anywhere in scope this month (a pure-return month still counts; any
+   genuine purchase, even if other agencies/returns net it negative,
+   does not — see buildZeroBillingData's comment), and SKUs that carry a
+   target but weren't genuinely purchased at any of this user's outlets
    this month. Target-only columns per spec, plus one overall Target
    total per table.
    --------------------------------------------------------------------- */
@@ -3174,8 +3360,8 @@ function renderZeroBillingPage() {
   ])));
   wrap.appendChild(kpi);
 
-  wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no sales this month (a return-driven negative counts as 0-billed too)", zeroOutletColumns(), z.outlets));
-  wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but not sold at any outlet this month", ZERO_SKU_COLUMNS, z.skus, {
+  wrap.appendChild(renderTable("zb_outlets", "0-Billed Outlets (" + z.outlets.length + ") — target exists but no real purchase anywhere this month (a pure return-only month still counts; a genuine purchase elsewhere does not, even if returns net the outlet negative)", zeroOutletColumns(), z.outlets));
+  wrap.appendChild(renderTable("zb_skus", "0-Billed SKUs (" + z.skus.length + ") — target exists but wasn't genuinely purchased at any outlet this month", ZERO_SKU_COLUMNS, z.skus, {
     secondaryExpand: {
       columnKey: "distTarget", // "Dist Target" on this table
       tableId: "zb_sku_notsupplied",
@@ -3191,6 +3377,396 @@ function renderZeroBillingPage() {
   }));
 
   content.appendChild(renderPageDownloadToolbar("0 Billing — " + MONTHS.find((m) => m.key === state.month).label));
+  content.appendChild(wrap);
+}
+
+/* ---------------------------------------------------------------------
+   RETURNS PAGE — four tables (Salesmen-wise / Agency-wise / Outlet-wise /
+   SKU-wise), each showing Return (from the sheet's own "Return Val"
+   column only), Return % (of Achievement) and Contribution % (this
+   row's share of the total Return across every row in that same table
+   — see withReturnMetrics' comment in the data layer). Salesmen-wise is
+   shown FIRST per explicit request, and only to Manager/GM/BDM/TME tier
+   — the other three tables are visible to every role, same as every
+   other page's own tables.
+   --------------------------------------------------------------------- */
+let currentReturns = null;
+let returnsLoading = false;
+let returnsError = null;
+
+/* Independent expand/collapse state for each of the 4 top-level Returns
+   tables — persists across re-renders (filter changes, sort clicks,
+   row-level "+"s) so collapsing/expanding one table is never undone by
+   something unrelated; only reset on logout. All 4 start collapsed (per
+   explicit request — "show only the name of the tables" until a table is
+   actually opened), and any combination can be open at once. */
+let returnsSectionOpen = { salesman: false, agency: false, outlet: false, sku: false };
+
+/* Renders one collapsible section: a full-width toggle bar showing just
+   the table's name when collapsed, and the real table (via bodyFn(), a
+   renderTable(...) call) appended below it when expanded. bodyFn() is
+   only ever called while expanded — a collapsed table is never built at
+   all (same "doesn't exist in the DOM unless expanded" idiom the
+   secondaryExpand detail rows already use), so a long Outlet/SKU-wise
+   table costs nothing in scroll height — or in CSV download content —
+   until you actually open it. */
+function renderReturnsSection(key, title, bodyFn) {
+  const isOpen = !!returnsSectionOpen[key];
+  const wrap = el("div", { class: "ret-section" });
+  const toggleBtn = el("button", {
+    class: "section-toggle-btn",
+    type: "button",
+    title: isOpen ? "Collapse this table" : "Expand this table",
+  }, [(isOpen ? "▾ " : "▸ ") + title]);
+  toggleBtn.addEventListener("click", () => {
+    returnsSectionOpen[key] = !returnsSectionOpen[key];
+    renderReturnsPage(); // cheap re-render only — currentReturns is already in memory, no refetch
+  });
+  wrap.appendChild(toggleBtn);
+  if (isOpen) wrap.appendChild(bodyFn());
+  return wrap;
+}
+
+const RETURN_COLUMNS_BASE = [
+  { key: "label", label: "" }, // overridden per table via returnColumnsWithLabel
+  { key: "target", label: "Target", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "net", label: "Achievement", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "return", label: "Return", numeric: true, fmt: (v) => fmtNum(v, 0) },
+  { key: "returnPct", label: "Return % (of Achievement)", numeric: true, fmt: (v) => fmtPct(v) },
+  { key: "contributionPct", label: "Contribution %", numeric: true, fmt: (v) => fmtPct(v) },
+];
+function returnColumnsWithLabel(labelHeader) {
+  const cols = RETURN_COLUMNS_BASE.map((c) => Object.assign({}, c));
+  cols[0] = { key: "label", label: labelHeader };
+  return cols;
+}
+// Button-only columns (empty cell + an inline "+" via opts.secondaryExpand)
+// appended on top of returnColumnsWithLabel() for each top-level table.
+function agencyReturnColumns() {
+  const cols = returnColumnsWithLabel("Agency");
+  cols.push({ key: "_skuBtn", label: "SKU Breakdown", fmt: () => "" });
+  cols.push({ key: "_outletBtn", label: "Outlet Breakdown", fmt: () => "" });
+  return cols;
+}
+function outletReturnColumns() {
+  const cols = returnColumnsWithLabel("Outlet");
+  cols.push({ key: "_agencyBtn", label: "Agency Breakdown", fmt: () => "" });
+  cols.push({ key: "_skuBtn", label: "SKU Breakdown", fmt: () => "" });
+  return cols;
+}
+function skuReturnColumns() {
+  const cols = returnColumnsWithLabel("SKU");
+  cols.push({ key: "_outletBtn", label: "Outlet Breakdown", fmt: () => "" });
+  cols.push({ key: "_salesmanBtn", label: "Salesman Breakdown", fmt: () => "" });
+  return cols;
+}
+function salesmanReturnColumns() {
+  const cols = returnColumnsWithLabel("Salesman");
+  cols.push({ key: "_agencyBtn", label: "Agency Breakdown", fmt: () => "" });
+  cols.push({ key: "_skuBtn", label: "SKU Breakdown", fmt: () => "" });
+  cols.push({ key: "_outletBtn", label: "Outlet Breakdown", fmt: () => "" });
+  return cols;
+}
+
+/* Rebuilds the exact same role+filter WHERE clause / sales-row slice the
+   Returns page itself just fetched with, at the moment a "+" button is
+   actually clicked (never prefetched) — same pattern as
+   zeroBillingWhereAndSales()/agencyFocusWhereAndSales(). */
+function returnsWhereAndSales() {
+  const cached = state.cache[state.month];
+  if (!cached) return null;
+  const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+  const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+  return { cached, whereT, salesRowsScoped };
+}
+
+function loadReturnsAgencySkuBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildAgencySkuBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped);
+}
+function loadReturnsAgencyOutletBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildAgencyOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped);
+}
+// Outlet-wise table's two buttons reuse the existing drill-downs the
+// Outlet Details / All Customers pages already rely on — only the
+// post-processing (resort by Return, attach the two % metrics) is new.
+function loadReturnsOutletAgencyBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildOutletAgencyBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._custCode, ctx.salesRowsScoped)
+    .then((rows) => withReturnMetrics(rows).sort((x, y) => y.return - x.return));
+}
+function loadReturnsOutletSkuBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildOutletSkuBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._custCode, ctx.salesRowsScoped)
+    .then((rows) => withReturnMetrics(rows).sort((x, y) => y.return - x.return));
+}
+// SKU-wise table's Outlet button reuses buildSkuOutletBreakdown as-is;
+// its Salesman button is the one genuinely new drill-down.
+function loadReturnsSkuOutletBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildSkuOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._itemCode, ctx.salesRowsScoped)
+    .then((rows) => withReturnMetrics(rows).sort((x, y) => y.return - x.return));
+}
+function loadReturnsSkuSalesmanBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildSkuSalesmanBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row._itemCode, ctx.salesRowsScoped);
+}
+function loadReturnsSalesmanAgencyBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildSalesmanAgencyBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped);
+}
+// Salesmen-wise table's SKU/Outlet buttons reuse the existing
+// buildSalesmanSkuBreakdown/buildSalesmanOutletBreakdown as-is (already
+// used by the Agency Focus page), just without that page's agency lock.
+function loadReturnsSalesmanSkuBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildSalesmanSkuBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped)
+    .then((rows) => withReturnMetrics(rows).sort((x, y) => y.return - x.return));
+}
+function loadReturnsSalesmanOutletBreakdown(row) {
+  const ctx = returnsWhereAndSales();
+  if (!ctx) return [];
+  return buildSalesmanOutletBreakdown(ctx.cached.targetSheetId, ctx.cached.targetColMap, ctx.whereT, row.label, ctx.salesRowsScoped)
+    .then((rows) => withReturnMetrics(rows).sort((x, y) => y.return - x.return));
+}
+
+async function fetchAndRenderReturns() {
+  const content = $("#content");
+  if (!content) return;
+  const cached = state.cache[state.month];
+  if (!cached) return;
+
+  const reqId = ++state._contentReqId;
+  returnsLoading = true;
+  returnsError = null;
+  // A real refetch invalidates every "+"-expanded breakdown on this page.
+  resetExpandable("ret_agency_sku");
+  resetExpandable("ret_agency_outlet");
+  resetExpandable("ret_outlet_agency");
+  resetExpandable("ret_outlet_sku");
+  resetExpandable("ret_sku_outlet");
+  resetExpandable("ret_sku_salesman");
+  resetExpandable("ret_salesman_agency");
+  resetExpandable("ret_salesman_sku");
+  resetExpandable("ret_salesman_outlet");
+  renderReturnsPage();
+
+  try {
+    const whereT = buildGqlWhere(cached.targetColMap, state.user, state.filters);
+    const salesRowsScoped = applyFilters(cached.salesRows, state.filters);
+    const isManagerTier = state.user.title === "MANAGER" || FULL_ACCESS_TITLES.includes(state.user.title);
+
+    // Deliberately SEQUENTIAL, not Promise.all — each of these is its own
+    // multi-query tree against the TARGET sheet, and firing them all at
+    // once is exactly what made the Agency Focus page unreliable (pile-up
+    // of concurrent queries past the browser's per-host connection limit —
+    // see buildAgencyFocusData's comment for the full writeup). One at a
+    // time costs some wall-clock time but stays reliable at every scope.
+    const agencyRows = await buildAgencyReturnsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped);
+    const outletsBuilt = await buildOutletsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped);
+    const skusBuilt = await buildSkusData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped);
+    const salesmanRows = isManagerTier
+      ? await buildSalesmanReturnsData(cached.targetSheetId, cached.targetColMap, whereT, salesRowsScoped)
+      : null;
+
+    const outletRows = withReturnMetrics(outletsBuilt.rows).sort((x, y) => y.return - x.return);
+    const skuRows = withReturnMetrics(skusBuilt.rows).sort((x, y) => y.return - x.return);
+    const overallReturn = returnDisplaySum(salesRowsScoped);
+    const overallNet = netAchSum(salesRowsScoped);
+
+    if (reqId !== state._contentReqId) return; // a newer request superseded this one
+    currentReturns = {
+      agency: agencyRows,
+      outlets: outletRows,
+      skus: skuRows,
+      salesman: salesmanRows,
+      overallReturn,
+      overallNet,
+      overallReturnPct: overallNet !== 0 ? (overallReturn / overallNet) * 100 : (overallReturn > 0 ? 100 : 0),
+    };
+    returnsLoading = false;
+    returnsError = null;
+  } catch (err) {
+    if (reqId !== state._contentReqId) return;
+    returnsLoading = false;
+    returnsError = "Could not load returns data: " + err.message;
+  }
+  renderReturnsPage();
+}
+
+function renderReturnsPage() {
+  const content = $("#content");
+  if (!content) return;
+  content.innerHTML = "";
+  resetPageTableRegistry();
+
+  const cached = state.cache[state.month];
+  if (state.loading && !cached) { content.appendChild(el("div", { class: "loading-block" }, ["Loading live data from Google Sheets…"])); return; }
+  if (state.error && !cached) { content.appendChild(el("div", { class: "error-block" }, [state.error])); return; }
+  if (!cached) { content.appendChild(el("div", { class: "loading-block" }, ["No data loaded yet."])); return; }
+
+  content.appendChild(el("h2", { class: "page-title" }, ["Returns — " + MONTHS.find((m) => m.key === state.month).label]));
+
+  if (returnsError) content.appendChild(el("div", { class: "error-block" }, [returnsError]));
+  if (returnsLoading && currentReturns) {
+    content.appendChild(el("div", { class: "updating-banner" }, ["Updating with your new filters — this can take a little while on a slow connection…"]));
+  } else if (returnsLoading) {
+    content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+  }
+  if (!currentReturns) {
+    if (!returnsLoading && !returnsError) content.appendChild(el("div", { class: "loading-block" }, ["Loading…"]));
+    return;
+  }
+
+  const r = currentReturns;
+  const wrap = el("div", { class: returnsLoading ? "content-stale" : "" });
+
+  const retKpiCards = [
+    ["Total Return", fmtNum(r.overallReturn, 0)],
+    ["Achievement (Net)", fmtNum(r.overallNet, 0)],
+    ["Return % (of Achievement)", fmtPct(r.overallReturnPct)],
+  ];
+  registerTableForDownload("KPI Summary", [{ key: "metric", label: "Metric" }, { key: "value", label: "Value" }], retKpiCards.map(([label2, val]) => ({ metric: label2, value: val })));
+  wrap.appendChild(el("div", { class: "kpi-grid" }, retKpiCards.map(([label2, val]) => el("div", { class: "kpi-card" }, [
+    el("div", { class: "kpi-value" }, [val]),
+    el("div", { class: "kpi-label" }, [label2]),
+  ]))));
+
+  // Salesmen-wise sits FIRST per explicit request, Manager/GM/BDM/TME tier
+  // only (same gating buildSummaryData's bySalesman table already uses) —
+  // a plain salesman never sees this table, but still sees every other
+  // table on this page.
+  if (r.salesman) {
+    wrap.appendChild(renderReturnsSection("salesman", "Salesmen-wise Returns (" + r.salesman.length + ")", () => renderTable("ret_salesman", "Salesmen-wise Returns", salesmanReturnColumns(), r.salesman, {
+      secondaryExpand: [
+        {
+          columnKey: "_agencyBtn",
+          tableId: "ret_salesman_agency",
+          keyOf: (row) => row.label,
+          loadDetail: loadReturnsSalesmanAgencyBreakdown,
+          detailColumns: returnColumnsWithLabel("Agency"),
+          detailTitle: (row) => "Agency-wise returns — " + row.label,
+          emptyText: "No agency carries a target for this salesman.",
+          buttonTitle: "Show which agency this salesman's returns are coming from",
+          collapseTitle: "Hide agency breakdown",
+        },
+        {
+          columnKey: "_skuBtn",
+          tableId: "ret_salesman_sku",
+          keyOf: (row) => row.label,
+          loadDetail: loadReturnsSalesmanSkuBreakdown,
+          detailColumns: returnColumnsWithLabel("SKU"),
+          detailTitle: (row) => "SKU-wise returns — " + row.label,
+          emptyText: "No SKU carries a target for this salesman.",
+          buttonTitle: "Show which SKU this salesman's returns are coming from",
+          collapseTitle: "Hide SKU breakdown",
+        },
+        {
+          columnKey: "_outletBtn",
+          tableId: "ret_salesman_outlet",
+          keyOf: (row) => row.label,
+          loadDetail: loadReturnsSalesmanOutletBreakdown,
+          detailColumns: returnColumnsWithLabel("Outlet"),
+          detailTitle: (row) => "Outlet-wise returns — " + row.label,
+          emptyText: "No outlet carries a target for this salesman.",
+          buttonTitle: "Show which outlet this salesman's returns are coming from",
+          collapseTitle: "Hide outlet breakdown",
+        },
+      ],
+    })));
+  }
+
+  wrap.appendChild(renderReturnsSection("agency", "Agency-wise Returns (" + r.agency.length + ")", () => renderTable("ret_agency", "Agency-wise Returns", agencyReturnColumns(), r.agency, {
+    secondaryExpand: [
+      {
+        columnKey: "_skuBtn",
+        tableId: "ret_agency_sku",
+        keyOf: (row) => row.label,
+        loadDetail: loadReturnsAgencySkuBreakdown,
+        detailColumns: returnColumnsWithLabel("SKU"),
+        detailTitle: (row) => "SKU-wise returns — " + row.label,
+        emptyText: "No SKU carries a target for this agency.",
+        buttonTitle: "Show which SKU this agency's returns are coming from",
+        collapseTitle: "Hide SKU breakdown",
+      },
+      {
+        columnKey: "_outletBtn",
+        tableId: "ret_agency_outlet",
+        keyOf: (row) => row.label,
+        loadDetail: loadReturnsAgencyOutletBreakdown,
+        detailColumns: returnColumnsWithLabel("Outlet"),
+        detailTitle: (row) => "Outlet-wise returns — " + row.label,
+        emptyText: "No outlet carries a target for this agency.",
+        buttonTitle: "Show which outlet this agency's returns are coming from",
+        collapseTitle: "Hide outlet breakdown",
+      },
+    ],
+  })));
+
+  wrap.appendChild(renderReturnsSection("outlet", "Outlet-wise Returns (" + r.outlets.length + ")", () => renderTable("ret_outlet", "Outlet-wise Returns", outletReturnColumns(), r.outlets, {
+    secondaryExpand: [
+      {
+        columnKey: "_agencyBtn",
+        tableId: "ret_outlet_agency",
+        keyOf: (row) => row._custCode,
+        loadDetail: loadReturnsOutletAgencyBreakdown,
+        detailColumns: returnColumnsWithLabel("Agency"),
+        detailTitle: (row) => "Agency-wise returns — " + row.label,
+        emptyText: "No agency carries a target at this outlet.",
+        buttonTitle: "Show which agency this outlet's returns are coming from",
+        collapseTitle: "Hide agency breakdown",
+      },
+      {
+        columnKey: "_skuBtn",
+        tableId: "ret_outlet_sku",
+        keyOf: (row) => row._custCode,
+        loadDetail: loadReturnsOutletSkuBreakdown,
+        detailColumns: returnColumnsWithLabel("SKU"),
+        detailTitle: (row) => "SKU-wise returns — " + row.label,
+        emptyText: "No SKU carries a target at this outlet.",
+        buttonTitle: "Show which SKU this outlet's returns are coming from",
+        collapseTitle: "Hide SKU breakdown",
+      },
+    ],
+  })));
+
+  wrap.appendChild(renderReturnsSection("sku", "SKU-wise Returns (" + r.skus.length + ")", () => renderTable("ret_sku", "SKU-wise Returns", skuReturnColumns(), r.skus, {
+    secondaryExpand: [
+      {
+        columnKey: "_outletBtn",
+        tableId: "ret_sku_outlet",
+        keyOf: (row) => row._itemCode,
+        loadDetail: loadReturnsSkuOutletBreakdown,
+        detailColumns: returnColumnsWithLabel("Outlet"),
+        detailTitle: (row) => "Outlet-wise returns — " + row.label,
+        emptyText: "No outlet carries a target for this SKU.",
+        buttonTitle: "Show which outlet this SKU's returns are coming from",
+        collapseTitle: "Hide outlet breakdown",
+      },
+      {
+        columnKey: "_salesmanBtn",
+        tableId: "ret_sku_salesman",
+        keyOf: (row) => row._itemCode,
+        loadDetail: loadReturnsSkuSalesmanBreakdown,
+        detailColumns: returnColumnsWithLabel("Salesman"),
+        detailTitle: (row) => "Salesman-wise returns — " + row.label,
+        emptyText: "No salesman carries a target for this SKU.",
+        buttonTitle: "Show which salesman this SKU's returns are coming from",
+        collapseTitle: "Hide salesman breakdown",
+      },
+    ],
+  })));
+
+  content.appendChild(renderPageDownloadToolbar("Returns — " + MONTHS.find((m) => m.key === state.month).label));
   content.appendChild(wrap);
 }
 
